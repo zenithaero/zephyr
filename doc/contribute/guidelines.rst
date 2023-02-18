@@ -335,17 +335,23 @@ Issues`_ in Github issues.
 Tools and Git Setup
 *******************
 
-Signed-off-by
-=============
+.. _git-name-and-email:
 
-The name in the commit message ``Signed-off-by:`` line and your email must
-match the change authorship information. Make sure your :file:`.gitconfig`
-is set up correctly:
+Name and email
+==============
+
+We need to know who you are, and how to contact you. To add this
+information to your Git installation, set the Git configuration
+variables ``user.name`` to your full name, and ``user.email`` to your
+email address.
+
+For example, if your name is ``Zephyr Developer`` and your email
+address is ``z.developer@example.com``:
 
 .. code-block:: console
 
-   git config --global user.name "David Developer"
-   git config --global user.email "david.developer@company.com"
+   git config --global user.name "Zephyr Developer"
+   git config --global user.email "z.developer@example.com"
 
 gitlint
 =========
@@ -370,24 +376,44 @@ twister
 =======
 
 .. note::
-   twister does not currently run on Windows.
+   twister support on windows is limited and execution of tests is not
+   supported, only building.
 
 To verify that your changes did not break any tests or samples, please run the
-``twister`` script locally before submitting your pull request to GitHub. To
-run the same tests the CI system runs, follow these steps from within your
+``twister`` script locally before submitting your pull request to GitHub.
+
+Twister allows limiting the scope of the tests built and run by pointing it to
+the tests related to the code or the platform you have modified. For example, to
+limit tests to a single platform and an area in the kernel::
+
+    source zephyr-env.sh
+    west twister -p qemu_x86 -T tests/kernel/sched
+
+Running tests on connected devices is also supported using the
+``--device-testing`` options. Please consult with the :ref:`Twister
+<twister_script>` documentation for more details.
+
+To run the same tests the CI system runs, follow these steps from within your
 local Zephyr source working directory:
 
 .. code-block:: console
 
     source zephyr-env.sh
-    ./scripts/twister
+    west twister --integration
 
 The above will execute the basic twister script, which will run various
-kernel tests using the QEMU emulator.  It will also do some build tests on
-various samples with advanced features that can't run in QEMU.
+tests using the QEMU emulator and other simulators supported in Zephyr.
+It will also do some build tests on various samples with advanced features that
+can't run in a simulator or QEMU.
 
-We highly recommend you run these tests locally to avoid any CI
-failures.
+We highly recommend you run these tests locally to avoid any CI failures
+However, note that building and executing tests using twister requires
+significant computing resources. When running locally and to get results in a
+reasonable time, limit the scope to the areas and platforms you have modified.
+In case of major changes to the kernel, build or configuration infrastructures
+of Zephyr, it is advised to use twister for verifying majority the changes
+before handing over to the dedicated CI resources provided by the Zephyr
+project.
 
 clang-format
 ============
@@ -560,7 +586,7 @@ workflow here:
 
    The ``-s`` option automatically adds your ``Signed-off-by:`` to your commit
    message.  Your commit will be rejected without this line that indicates your
-   agreement with the `DCO`_.  See the `Commit Guidelines`_ section for
+   agreement with the :ref:`DCO`.  See the :ref:`commit-guidelines` section for
    specific guidelines for writing your commit messages.
 
 #. Push your topic branch with your changes to your fork in your personal
@@ -573,12 +599,8 @@ workflow here:
    you want to open a pull request with.
 
 #. Review the pull request changes, and verify that you are opening a
-   pull request for the appropriate branch. The title and message from your
-   commit message should appear as well.
-
-#. If you're working on a subsystem branch that's not ``main``,
-   you may need to change the intended branch for the pull request
-   here, for example, by changing the base branch from ``main`` to ``net``.
+   pull request for the appropriate branch (if unsure, use `main`). The title
+   and message from your commit message should appear as well.
 
 #. GitHub will assign one or more suggested reviewers (based on the
    CODEOWNERS file in the repo). If you are a project member, you can
@@ -587,6 +609,13 @@ workflow here:
 #. Click on the submit button and your pull request is sent and awaits
    review.  Email will be sent as review comments are made, or you can check
    on your pull request at https://github.com/zephyrproject-rtos/zephyr/pulls.
+
+   .. note:: As more commits are merged upstream, the GitHub PR page will show
+      a ``This branch is out-of-date with the base branch`` message and a
+      ``Update branch`` button on the PR page. That message should be ignored,
+      as the commits will be rebased as part of merging anyway, and triggering
+      a branch update from the GitHub UI will cause the PR approvals to be
+      dropped.
 
 #. While you're waiting for your pull request to be accepted and merged, you
    can create another branch to work on another issue. (Be sure to make your
@@ -640,52 +669,145 @@ workflow here:
    Additional information about the CI system can be found in
    `Continuous Integration`_.
 
+.. _commit-guidelines:
 
-Commit Guidelines
-*****************
+Commit Message Guidelines
+*************************
 
-Changes are submitted as Git commits. Each commit message must contain:
+Changes are submitted as Git commits. Each commit has a *commit
+message* describing the change. Acceptable commit messages look like
+this:
 
-* A short and descriptive subject line that is less than 72 characters,
-  followed by a blank line. The subject line must include a prefix that
-  identifies the subsystem being changed, followed by a colon, and a short
-  title, for example:  ``doc: update wiki references to new site``.
-  (If you're updating an existing file, you can use
-  ``git log <filename>`` to see what developers used as the prefix for
-  previous patches of this file.)
+.. code-block:: none
 
-* A change description with your logic or reasoning for the changes, followed
-  by a blank line. (Every single line has to be less than 75 characters.)
+   [area]: [summary of change]
 
-* A Signed-off-by line, ``Signed-off-by: <name> <email>`` typically added
-  automatically by using ``git commit -s``
+   [Commit message body (must be non-empty)]
 
-* If the change addresses an issue, include a line of the form::
+   Signed-off-by: [Your Full Name] <[your.email@address]>
 
-      Fixes #<issue number>.
+You need to change text in square brackets (``[like this]``) above to
+fit your commit.
 
+Examples and more details follow.
 
-All changes and topics sent to GitHub must be well-formed, as described above.
+Example
+=======
+
+Here is an example of a good commit message.
+
+.. code-block:: none
+
+   drivers: sensor: abcd1234: fix bus I/O error handling
+
+   The abcd1234 sensor driver is failing to check the flags field in
+   the response packet from the device which signals that an error
+   occurred. This can lead to reading invalid data from the response
+   buffer. Fix it by checking the flag and adding an error path.
+
+   Signed-off-by: Zephyr Developer <z.developer@example.com>
+
+[area]: [summary of change]
+===========================
+
+This line is called the commit's *title*. Titles must be:
+
+* one line
+* less than 72 characters long
+* followed by a completely blank line
+
+[area]
+  The ``[area]`` prefix usually identifies the area of code
+  being changed. It can also identify the change's wider
+  context if multiple areas are affected.
+
+  Here are some examples:
+
+  * ``doc: ...`` for documentation changes
+  * ``drivers: foo:`` for ``foo`` driver changes
+  * ``Bluetooth: Shell:`` for changes to the Bluetooth shell
+  * ``net: ethernet:`` for Ethernet-related networking changes
+  * ``dts:`` for treewide devicetree changes
+  * ``style:`` for code style changes
+
+  If you're not sure what to use, try running ``git log FILE``, where
+  ``FILE`` is a file you are changing, and using previous commits that
+  changed the same file as inspiration.
+
+[summary of change]
+  The ``[summary of change]`` part should be a quick description of
+  what you've done. Here are some examples:
+
+  * ``doc: update wiki references to new site``
+  * ``drivers: sensor: sensor_shell: fix channel name collision``
 
 Commit Message Body
 ===================
 
-When editing the commit message, please briefly explain what your change
-does and why it's needed. A change summary of ``"Fixes stuff"`` will be rejected.
-
 .. warning::
-   An empty change summary body is not permitted. Even for trivial changes, please
-   include a summary body in the commit message.
 
-The description body of the commit message must include:
+   An empty commit message body is not permitted. Even for trivial
+   changes, please include a descriptive commit message body. Your
+   pull request will fail CI checks if you do not.
+
+This part of the commit should explain what your change does, and why
+it's needed. Be specific. A body that says ``"Fixes stuff"`` will be
+rejected. Be sure to include the following as relevant:
 
 * **what** the change does,
 * **why** you chose that approach,
 * **what** assumptions were made, and
 * **how** you know it works -- for example, which tests you ran.
 
+Each line in your commit message should usually be 75 characters or
+less. Use newlines to wrap longer lines. Exceptions include lines
+with long URLs, email addresses, etc.
+
 For examples of accepted commit messages, you can refer to the Zephyr GitHub
 `changelog <https://github.com/zephyrproject-rtos/zephyr/commits/main>`__.
+
+If the change addresses a GitHub issue, include a line of the form:
+
+.. code-block:: none
+
+   Fixes #[issue number]
+
+Where ``[issue number]`` is the relevant GitHub issue's number. For
+example:
+
+.. code-block:: none
+
+   Fixes: #1234
+
+Signed-off-by: ...
+==================
+
+.. tip::
+
+   You should have set your :ref:`git-name-and-email`
+   already. Create your commit with ``git commit -s`` to add the
+   Signed-off-by: line automatically using this information.
+
+For open source licensing reasons, your commit must include a
+Signed-off-by: line that looks like this:
+
+.. code-block:: none
+
+   Signed-off-by: [Your Full Name] <[your.email@address]>
+
+For example, if your full name is ``Zephyr Developer`` and your email
+address is ``z.developer@example.com``:
+
+.. code-block:: none
+
+   Signed-off-by: Zephyr Developer <z.developer@example.com>
+
+This means that you have personally made sure your change complies
+with the :ref:`DCO`. For this reason, you must use your legal name.
+Pseudonyms or "hacker aliases" are not permitted.
+
+Your name and the email address you use must match the name and email
+in the Git commit's ``Author:`` field.
 
 Other Commit Expectations
 =========================
@@ -807,3 +929,72 @@ Contributions to External Modules
 Follow the guidelines in the :ref:`modules` section for contributing
 :ref:`new modules <submitting_new_modules>` and
 submitting changes to :ref:`existing modules <changes_to_existing_module>`.
+
+.. _treewide-changes:
+
+Treewide Changes
+****************
+
+This section describes contributions that are treewide changes and some
+additional associated requirements that apply to them. These requirements exist
+to try to give such changes increased review and user visibility due to their
+large impact.
+
+Definition and Decision Making
+==============================
+
+A *treewide change* is defined as any change to Zephyr APIs, coding practices,
+or other development requirements that either implies required changes
+throughout the zephyr source code repository or can reasonably be expected to
+do so for a wide class of external Zephyr-based source code.
+
+This definition is informal by necessity. This is because the decision on
+whether any particular change is treewide can be subjective and may depend on
+additional context.
+
+Project maintainers should use good judgement and prioritize the Zephyr
+developer experience when deciding when a proposed change is treewide.
+Protracted disagreements can be resolved by the Zephyr Project's Technical
+Steering Committee (TSC), but please avoid premature escalation to the TSC.
+
+Requirements for Treewide Changes
+=================================
+
+- The zephyr repository must apply the 'treewide' GitHub label to any issues or
+  pull requests that are treewide changes
+
+- The person proposing a treewide change must create an `RFC issue
+  <https://github.com/zephyrproject-rtos/zephyr/issues/new?assignees=&labels=RFC&template=rfc-proposal.md&title=>`_
+  describing the change, its rationale and impact, etc. before any pull
+  requests related to the change can be merged
+
+- The project's `Architecture Working Group (WG)
+  <https://github.com/zephyrproject-rtos/zephyr/wiki/Architecture-Working-Group>`_
+  must include the issue on the agenda and discuss whether the project will
+  accept or reject the change before any pull requests related to the change
+  can be merged (with escalation to the TSC if consensus is not reached at the
+  WG)
+
+- The Architecture WG must specify the procedure for merging any PRs associated
+  with each individual treewide change, including any required approvals for
+  pull requests affecting specific subsystems or extra review time requirements
+
+- The person proposing a treewide change must email
+  devel@lists.zephyrproject.org about the RFC if it is accepted by the
+  Architecture WG before any pull requests related to the change can be merged
+
+Examples
+========
+
+Some example past treewide changes are:
+
+- the deprecation of version 1 of the :ref:`Logging API <logging_api>` in favor
+  of version 2 (see commit `262cc55609
+  <https://github.com/zephyrproject-rtos/zephyr/commit/262cc55609b73ea61b5f999c6c6daaba20bc5240>`_)
+- the removal of support for a legacy :ref:`dt-bindings` syntax
+  (`6bf761fc0a
+  <https://github.com/zephyrproject-rtos/zephyr/commit/6bf761fc0a2811b037abec0c963d60b00c452acb>`_)
+
+Note that adding a new version of a widely used API while maintaining
+support for the old one is not a treewide change. Deprecation and removal of
+such APIs, however, are treewide changes.
