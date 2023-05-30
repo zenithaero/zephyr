@@ -109,6 +109,18 @@
 	d3ppre = <2>;
 };
 
+&dma1 {
+	status = "okay";
+};
+
+&dma2 {
+	status = "okay";
+};
+
+&dmamux1 {
+	status = "okay";
+};
+
 &usart1 {
 	pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
 	pinctrl-names = "default";
@@ -117,6 +129,9 @@
 };
 
 &usart2 {
+	dmas = <&dmamux1 2 44 STM32_DMA_PERIPH_TX>,
+		<&dmamux1 3 43 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
@@ -124,7 +139,24 @@
 };
 
 &uart4 {
+	dmas = <&dmamux1 4 64 STM32_DMA_PERIPH_TX>,
+		<&dmamux1 5 63 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 	pinctrl-0 = <&uart4_tx_ph13 &uart4_rx_ph14>;
+	pinctrl-names = "default";
+  current-speed = <115200>;
+	status = "okay";
+};
+
+&uart5 {
+	pinctrl-0 = <&uart5_tx_pb6 &uart5_rx_pb12>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+&usart6 {
+	pinctrl-0 = <&usart6_tx_pc6 &usart6_rx_pc7>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
 	status = "okay";
@@ -162,6 +194,9 @@
 };
 
 &spi2 {
+	dmas = <&dmamux1 6 40 STM32_DMA_PERIPH_TX>,
+		<&dmamux1 7 39 STM32_DMA_PERIPH_RX>;
+	dma-names = "tx", "rx";
 	pinctrl-0 = <&spi2_sck_pa12 &spi2_miso_pb14 &spi2_mosi_pb15 &spi2_nss_pi0>;
 	pinctrl-names = "default";
 	status = "okay";

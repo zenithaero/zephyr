@@ -55,7 +55,7 @@
 
 	flashcontroller0: flash-controller@0 {
 		compatible = "zephyr,sim-flash";
-		reg = <0x00000000 DT_SIZE_K(2048)>;
+		reg = <0x00000000 DT_SIZE_K(65536)>;
 
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -66,7 +66,7 @@
 			compatible = "soc-nv-flash";
 			erase-block-size = <4096>;
 			write-block-size = <1>;
-			reg = <0x00000000 DT_SIZE_K(2048)>;
+			reg = <0x00000000 DT_SIZE_K(65536)>;
 
 			partitions {
 				compatible = "fixed-partitions";
@@ -91,7 +91,7 @@
 				};
 				storage_partition: partition@fc000 {
 					label = "storage";
-					reg = <0x000fc000 0x00004000>;
+					reg = <0x000fc000 0x02000000>;
 				};
 			};
 		};
@@ -175,8 +175,8 @@
 
 	sdl_dc: sdl_dc {
 		compatible = "zephyr,sdl-dc";
-		height = <240>;
-		width = <320>;
+		height = <272>;
+		width = <480>;
 	};
 
 	input-sdl-touch {
