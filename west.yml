@@ -130,11 +130,11 @@ manifest:
     #   path: modules/hal/silabs
     #   groups:
     #     - hal
-    - name: hal_st
-      revision: 5948f7b3304f1628a45ee928cd607619a7f53bbb
-      path: modules/hal/st
-      groups:
-        - hal
+    # - name: hal_st
+    #   revision: 5948f7b3304f1628a45ee928cd607619a7f53bbb
+    #   path: modules/hal/st
+    #   groups:
+    #     - hal
     - name: hal_stm32
       revision: c865374fc83d93416c0f380e6310368ff55d6ce2
       path: modules/hal/stm32
