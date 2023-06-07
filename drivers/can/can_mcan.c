@@ -6,13 +6,12 @@
  */
 
 #include <zephyr/drivers/can.h>
+#include <zephyr/drivers/can/can_mcan.h>
 #include <zephyr/drivers/can/transceiver.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
-
-#include "can_mcan.h"
 
 LOG_MODULE_REGISTER(can_mcan, CONFIG_CAN_LOG_LEVEL);
 
@@ -210,8 +209,8 @@ int can_mcan_set_timing(const struct device *dev, const struct can_timing *timin
 	}
 
 	__ASSERT_NO_MSG(timing->prop_seg == 0U);
-	__ASSERT_NO_MSG(timing->phase_seg1 <= 0x100 && timing->phase_seg1 > 0U);
-	__ASSERT_NO_MSG(timing->phase_seg2 <= 0x80 && timing->phase_seg2 > 0U);
+	__ASSERT_NO_MSG(timing->phase_seg1 <= 0x100 && timing->phase_seg1 > 1U);
+	__ASSERT_NO_MSG(timing->phase_seg2 <= 0x80 && timing->phase_seg2 > 1U);
 	__ASSERT_NO_MSG(timing->prescaler <= 0x200 && timing->prescaler > 0U);
 	__ASSERT_NO_MSG(timing->sjw == CAN_SJW_NO_CHANGE ||
 			(timing->sjw <= 0x80 && timing->sjw > 0U));
@@ -260,7 +259,7 @@ int can_mcan_set_timing_data(const struct device *dev, const struct can_timing *
 	__ASSERT_NO_MSG(timing_data->phase_seg2 <= 0x10 && timing_data->phase_seg2 > 0U);
 	__ASSERT_NO_MSG(timing_data->prescaler <= 0x20 && timing_data->prescaler > 0U);
 	__ASSERT_NO_MSG(timing_data->sjw == CAN_SJW_NO_CHANGE ||
-			(timing_data->sjw <= 0x80 && timing_data->sjw > 0U));
+			(timing_data->sjw <= 0x10 && timing_data->sjw > 0U));
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 
@@ -475,7 +474,7 @@ static void can_mcan_state_change_handler(const struct device *dev)
 	}
 }
 
-static void can_mcan_tc_event_handler(const struct device *dev)
+static void can_mcan_tx_event_handler(const struct device *dev)
 {
 	const struct can_mcan_config *config = dev->config;
 	const struct can_mcan_callbacks *cbs = config->callbacks;
@@ -541,13 +540,18 @@ void can_mcan_line_0_isr(const struct device *dev)
 	}
 
 	while ((ir & events) != 0U) {
+		err = can_mcan_write_reg(dev, CAN_MCAN_IR, ir & events);
+		if (err != 0) {
+			return;
+		}
+
 		if ((ir & (CAN_MCAN_IR_BO | CAN_MCAN_IR_EP | CAN_MCAN_IR_EW)) != 0U) {
 			can_mcan_state_change_handler(dev);
 		}
 
 		/* TX event FIFO new entry */
 		if ((ir & CAN_MCAN_IR_TEFN) != 0U) {
-			can_mcan_tc_event_handler(dev);
+			can_mcan_tx_event_handler(dev);
 		}
 
 		if ((ir & CAN_MCAN_IR_TEFL) != 0U) {
@@ -561,11 +565,6 @@ void can_mcan_line_0_isr(const struct device *dev)
 
 		if (ir & CAN_MCAN_IR_MRAF) {
 			LOG_ERR("Message RAM access failure");
-		}
-
-		err = can_mcan_write_reg(dev, CAN_MCAN_IR, events);
-		if (err != 0) {
-			return;
 		}
 
 		err = can_mcan_read_reg(dev, CAN_MCAN_IR, &ir);
@@ -722,6 +721,11 @@ void can_mcan_line_1_isr(const struct device *dev)
 	}
 
 	while ((ir & events) != 0U) {
+		err = can_mcan_write_reg(dev, CAN_MCAN_IR, events & ir);
+		if (err != 0) {
+			return;
+		}
+
 		if ((ir & CAN_MCAN_IR_RF0N) != 0U) {
 			LOG_DBG("RX FIFO0 INT");
 			can_mcan_get_message(dev, config->mram_offsets[CAN_MCAN_MRAM_CFG_RX_FIFO0],
@@ -740,11 +744,6 @@ void can_mcan_line_1_isr(const struct device *dev)
 
 		if ((ir & CAN_MCAN_IR_RF1L) != 0U) {
 			LOG_ERR("Message lost on FIFO1");
-		}
-
-		err = can_mcan_write_reg(dev, CAN_MCAN_IR, events);
-		if (err != 0) {
-			return;
 		}
 
 		err = can_mcan_read_reg(dev, CAN_MCAN_IR, &ir);
@@ -968,9 +967,9 @@ int can_mcan_add_rx_filter_std(const struct device *dev, can_rx_callback_t callb
 	const struct can_mcan_callbacks *cbs = config->callbacks;
 	struct can_mcan_data *data = dev->data;
 	struct can_mcan_std_filter filter_element = {
-		.id1 = filter->id,
-		.id2 = filter->mask,
-		.sft = CAN_MCAN_SFT_MASKED
+		.sfid1 = filter->id,
+		.sfid2 = filter->mask,
+		.sft = CAN_MCAN_SFT_CLASSIC
 	};
 	int filter_id = -ENOSPC;
 	int err;
@@ -992,7 +991,7 @@ int can_mcan_add_rx_filter_std(const struct device *dev, can_rx_callback_t callb
 	}
 
 	/* TODO proper fifo balancing */
-	filter_element.sfce = filter_id & 0x01 ? CAN_MCAN_FCE_FIFO1 : CAN_MCAN_FCE_FIFO0;
+	filter_element.sfec = filter_id & 0x01 ? CAN_MCAN_XFEC_FIFO1 : CAN_MCAN_XFEC_FIFO0;
 
 	err = can_mcan_write_mram(dev, config->mram_offsets[CAN_MCAN_MRAM_CFG_STD_FILTER] +
 				  filter_id * sizeof(struct can_mcan_std_filter),
@@ -1021,9 +1020,9 @@ static int can_mcan_add_rx_filter_ext(const struct device *dev, can_rx_callback_
 	const struct can_mcan_callbacks *cbs = config->callbacks;
 	struct can_mcan_data *data = dev->data;
 	struct can_mcan_ext_filter filter_element = {
-		.id2 = filter->mask,
-		.id1 = filter->id,
-		.eft = CAN_MCAN_EFT_MASKED
+		.efid2 = filter->mask,
+		.efid1 = filter->id,
+		.eft = CAN_MCAN_EFT_CLASSIC
 	};
 	int filter_id = -ENOSPC;
 	int err;
@@ -1045,7 +1044,7 @@ static int can_mcan_add_rx_filter_ext(const struct device *dev, can_rx_callback_
 	}
 
 	/* TODO proper fifo balancing */
-	filter_element.efce = filter_id & 0x01 ? CAN_MCAN_FCE_FIFO1 : CAN_MCAN_FCE_FIFO0;
+	filter_element.efec = filter_id & 0x01 ? CAN_MCAN_XFEC_FIFO1 : CAN_MCAN_XFEC_FIFO0;
 
 	err = can_mcan_write_mram(dev, config->mram_offsets[CAN_MCAN_MRAM_CFG_EXT_FILTER] +
 				  filter_id * sizeof(struct can_mcan_ext_filter),
