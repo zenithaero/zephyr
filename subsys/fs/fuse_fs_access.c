@@ -453,10 +453,10 @@ static void *fuse_fs_access_main(void *arg)
 	ARG_UNUSED(arg);
 
 	char *argv[] = {
-		"",
+		" ", // Fixes execution on debian
+		(char *) fuse_mountpoint,
 		"-f",
 		"-s",
-		(char *) fuse_mountpoint
 	};
 	int argc = ARRAY_SIZE(argv);
 

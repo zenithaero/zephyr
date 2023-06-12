@@ -242,13 +242,13 @@ static int np_uart_0_init(const struct device *dev)
 		np_uart_driver_api_0.poll_in = np_uart_stdin_poll_in;
 
 		if (isatty(STDIN_FILENO)) {
-			WARN("The UART driver has been configured to map to the"
-			     " process stdin&out (NATIVE_UART_0_ON_STDINOUT), "
-			     "but stdin seems to be left attached to the shell."
-			     " This will most likely NOT behave as you want it "
-			     "to. This option is NOT meant for interactive use "
-			     "but for piping/feeding from/to files to the UART"
-			     );
+			// WARN("The UART driver has been configured to map to the"
+			//      " process stdin&out (NATIVE_UART_0_ON_STDINOUT), "
+			//      "but stdin seems to be left attached to the shell."
+			//      " This will most likely NOT behave as you want it "
+			//      "to. This option is NOT meant for interactive use "
+			//      "but for piping/feeding from/to files to the UART"
+			//      );
 		}
 	}
 
