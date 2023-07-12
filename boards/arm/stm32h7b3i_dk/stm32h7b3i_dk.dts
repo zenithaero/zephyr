@@ -176,6 +176,17 @@
 	status = "okay";
 };
 
+&timers13 {
+	st,prescaler = <239>;
+	status = "okay";
+
+	pwm13: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim13_ch1_pf8>;
+		pinctrl-names = "default";
+	};
+};
+
 &i2c4 {
 	pinctrl-0 = <&i2c4_scl_pd12 &i2c4_sda_pd13>;
 	pinctrl-names = "default";
