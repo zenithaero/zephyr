@@ -5,4 +5,4 @@
 
 mainmenu "Zephyr Kernel Configuration"
 
-source "Kconfig.mercury"
+source "${MERCURY_PATH}/conf/Kconfig.mercury"
