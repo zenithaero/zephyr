@@ -1,0 +1,128 @@
+# Mercury configuration options
+
+source "Kconfig.zephyr"
+
+menu "Mercury options"
+
+# System
+
+choice 
+  prompt "MERCURY BOARD TYPE"
+
+config MERCURY_MAIN_CONTROL
+  bool "MERCURY_MAIN_CONTROL"
+  
+config MERCURY_CONSOLE
+  bool "MERCURY_CONSOLE"
+
+endchoice
+
+# Threads
+config MERCURY_THREAD_CONTROLLER
+  bool "MERCURY_THREAD_CONTROLLER"
+  default y
+
+config MERCURY_THREAD_FILELOG
+  bool "MERCURY_THREAD_FILELOG"
+  depends on FILE_SYSTEM
+  default y
+
+
+config MERCURY_THREAD_DISPLAY
+  bool "MERCURY_THREAD_DISPLAY"
+  depends on DISPLAY
+  default y
+
+config MERCURY_THREAD_SERVICE
+  bool "MERCURY_THREAD_SERVICE"
+  default y
+
+config MERCURY_THREAD_COMMUNICATION
+  bool "MERCURY_THREAD_COMMUNICATION"
+  default y
+
+config MERCURY_THREAD_SITL
+  bool "MERCURY_THREAD_SITL"
+  depends on NATIVE_POSIX
+  default n
+
+# UART Expander
+config MERCURY_DEVICE_UART_EXPANDER
+  bool "MERCURY_DEVICE_UART_EXPANDER"
+  depends on !NATIVE_POSIX && (SPI || I2C) && MERCURY_THREAD_SERVICE
+  default y
+
+# Device modules
+config MERCURY_DEVICE_SERVO
+  bool "MERCURY_DEVICE_SERVO"
+  depends on MERCURY_THREAD_SERVICE
+  default y
+
+config MERCURY_DEVICE_AHRS
+  bool "MERCURY_DEVICE_AHRS"
+  depends on MERCURY_THREAD_SERVICE
+  default y
+
+config MERCURY_DEVICE_GYRO
+  bool "MERCURY_DEVICE_GYRO"
+  depends on MERCURY_THREAD_SERVICE
+  default y
+
+config MERCURY_DEVICE_RSSI
+  bool "MERCURY_DEVICE_RSSI"
+  depends on MERCURY_THREAD_SERVICE
+  default y
+
+config MERCURY_DEVICE_FAN
+  bool "MERCURY_MODULE_FAN"
+  depends on !NATIVE_POSIX && MERCURY_THREAD_SERVICE
+  default y
+
+# Communication modules
+config MERCURY_COMM_MAV_TELEMETRY
+  bool "MERCURY_COMM_MAV_TELEMETRY"
+  depends on MERCURY_THREAD_COMMUNICATION
+  default y
+
+config MERCURY_COMM_MAV_DISPLAY
+  bool "MERCURY_COMM_MAV_DISPLAY"
+  depends on MERCURY_THREAD_COMMUNICATION
+  default y
+
+config MERCURY_COMM_MONITOR
+  bool "MERCURY_COMM_MONITOR"
+  depends on MERCURY_THREAD_COMMUNICATION
+  default y
+
+
+# Sitl
+config MERCURY_FORCE_SITL_SERVO
+  bool
+  imply MERCURY_SITL_SERVO
+  default MERCURY_DEVICE_SERVO && !CANOPEN
+
+config MERCURY_SITL_SERVO
+  bool "MERCURY_SITL_SERVO"
+  depends on MERCURY_DEVICE_SERVO
+
+config MERCURY_SITL_GYRO
+  bool "MERCURY_SITL_GYRO"
+  depends on MERCURY_DEVICE_GYRO
+
+config MERCURY_SITL_AHRS
+  bool "MERCURY_SITL_AHRS"
+  depends on MERCURY_DEVICE_AHRS
+
+config MERCURY_SITL_RSSI
+  bool "MERCURY_SITL_RSSI"
+  depends on MERCURY_DEVICE_RSSI
+
+# Lib
+config MERCURY_LIB_CANOPEN
+  bool
+  default CANOPEN && MERCURY_DEVICE_SERVO && !MERCURY_SITL_SERVO
+
+config MERCURY_LIB_SBG
+  bool
+  default (MERCURY_DEVICE_AHRS && !MERCURY_SITL_AHRS) || (MERCURY_DEVICE_GYRO && !MERCURY_SITL_GYRO)
+endmenu
