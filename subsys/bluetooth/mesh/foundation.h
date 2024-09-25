@@ -122,6 +122,19 @@
 #define OP_SOL_PDU_RPL_ITEM_CLEAR_UNACKED  BT_MESH_MODEL_OP_2(0x80, 0x79)
 #define OP_SOL_PDU_RPL_ITEM_STATUS         BT_MESH_MODEL_OP_2(0x80, 0x7a)
 
+#define OP_SUBNET_BRIDGE_GET          BT_MESH_MODEL_OP_2(0x80, 0xb1)
+#define OP_SUBNET_BRIDGE_SET          BT_MESH_MODEL_OP_2(0x80, 0xb2)
+#define OP_SUBNET_BRIDGE_STATUS       BT_MESH_MODEL_OP_2(0x80, 0xb3)
+#define OP_BRIDGING_TABLE_ADD         BT_MESH_MODEL_OP_2(0x80, 0xb4)
+#define OP_BRIDGING_TABLE_REMOVE      BT_MESH_MODEL_OP_2(0x80, 0xb5)
+#define OP_BRIDGING_TABLE_STATUS      BT_MESH_MODEL_OP_2(0x80, 0xb6)
+#define OP_BRIDGED_SUBNETS_GET        BT_MESH_MODEL_OP_2(0x80, 0xb7)
+#define OP_BRIDGED_SUBNETS_LIST       BT_MESH_MODEL_OP_2(0x80, 0xb8)
+#define OP_BRIDGING_TABLE_GET         BT_MESH_MODEL_OP_2(0x80, 0xb9)
+#define OP_BRIDGING_TABLE_LIST        BT_MESH_MODEL_OP_2(0x80, 0xba)
+#define OP_BRIDGING_TABLE_SIZE_GET    BT_MESH_MODEL_OP_2(0x80, 0xbb)
+#define OP_BRIDGING_TABLE_SIZE_STATUS BT_MESH_MODEL_OP_2(0x80, 0xbc)
+
 #define STATUS_SUCCESS                     0x00
 #define STATUS_INVALID_ADDRESS             0x01
 #define STATUS_INVALID_MODEL               0x02
@@ -150,19 +163,17 @@
 
 void bt_mesh_model_reset(void);
 
-void bt_mesh_attention(struct bt_mesh_model *model, uint8_t time);
+void bt_mesh_attention(const struct bt_mesh_model *model, uint8_t time);
 
 #include <zephyr/sys/byteorder.h>
 
-static inline void key_idx_pack(struct net_buf_simple *buf,
-				uint16_t idx1, uint16_t idx2)
+static inline void key_idx_pack_pair(struct net_buf_simple *buf, uint16_t idx1, uint16_t idx2)
 {
 	net_buf_simple_add_le16(buf, idx1 | ((idx2 & 0x00f) << 12));
 	net_buf_simple_add_u8(buf, idx2 >> 4);
 }
 
-static inline void key_idx_unpack(struct net_buf_simple *buf,
-				  uint16_t *idx1, uint16_t *idx2)
+static inline void key_idx_unpack_pair(struct net_buf_simple *buf, uint16_t *idx1, uint16_t *idx2)
 {
 	*idx1 = sys_get_le16(&buf->data[0]) & 0xfff;
 	*idx2 = sys_get_le16(&buf->data[1]) >> 4;

@@ -1,7 +1,8 @@
-.. _adc_cmp_npcx:
+.. zephyr:code-sample:: adc_cmp_npcx
+   :name: NPCX ADC Comparator
+   :relevant-api: sensor_interface
 
-NPCX ADC Comparator
-###################
+   Detect upper/lower voltage limits using NPCX ADC Comparator driver.
 
 Overview
 ********
@@ -21,7 +22,7 @@ to ADC channel 8, when voltages cross upper/lower limits, detection messages
 will be printed.
 
 .. zephyr-app-commands::
-   :zephyr-app: samples/sensor/adc_cmp
+   :zephyr-app: samples/sensor/adc_cmp_npcx
    :board: npcx9m6f_evb
    :goals: flash
    :compact:

@@ -5,18 +5,16 @@
  */
 
 #define DT_DRV_COMPAT ovti_ov7725
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-
 #include <zephyr/sys/byteorder.h>
-
+#include <zephyr/logging/log.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/gpio.h>
 
-#define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(ov7725);
+LOG_MODULE_REGISTER(video_ov7725, CONFIG_VIDEO_LOG_LEVEL);
 
 #define OV7725_REVISION  0x7721U
 
@@ -633,7 +631,7 @@ static int ov7725_init_0(const struct device *dev)
 	}
 
 #if DT_INST_NODE_HAS_PROP(0, reset_gpios)
-	if (!device_is_ready(cfg->reset_gpio.port)) {
+	if (!gpio_is_ready_dt(&cfg->reset_gpio)) {
 		LOG_ERR("%s: device %s is not ready", dev->name,
 				cfg->reset_gpio.port->name);
 		return -ENODEV;

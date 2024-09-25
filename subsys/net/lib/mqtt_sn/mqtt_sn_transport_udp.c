@@ -15,11 +15,7 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/socket.h>
 
-#ifdef CONFIG_ARCH_POSIX
-#include <fcntl.h>
-#else
 #include <zephyr/posix/fcntl.h>
-#endif
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(net_mqtt_sn, CONFIG_MQTT_SN_LOG_LEVEL);
@@ -61,7 +57,7 @@ static int tp_udp_init(struct mqtt_sn_transport *transport)
 	out = get_ip_str((struct sockaddr *)&udp->gwaddr, ip, sizeof(ip));
 	if (out != NULL) {
 		LOG_DBG("Connecting to IP %s:%u", out,
-			((struct sockaddr_in *)&udp->gwaddr)->sin_port);
+			ntohs(((struct sockaddr_in *)&udp->gwaddr)->sin_port));
 	}
 #endif
 

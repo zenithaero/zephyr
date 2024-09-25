@@ -6,6 +6,11 @@
 
 #ifndef ZEPHYR_INCLUDE_TOOLCHAIN_COMMON_H_
 #define ZEPHYR_INCLUDE_TOOLCHAIN_COMMON_H_
+
+#ifndef ZEPHYR_INCLUDE_TOOLCHAIN_H_
+#error Please do not include toolchain-specific headers directly, use <zephyr/toolchain.h> instead
+#endif
+
 /**
  * @file
  * @brief Common toolchain abstraction
@@ -33,6 +38,24 @@
 #define ZRESTRICT
 #endif
 #endif
+
+/*
+ * Thread local variables are declared with different keywords depending on
+ * which C/C++ standard that is used. C++11 and C23 uses "thread_local" whilst
+ * C11 uses "_Thread_local". Previously the GNU "__thread" keyword was used
+ * which is the same in both gcc and g++.
+ */
+#ifndef Z_THREAD_LOCAL
+#if defined(__cplusplus) && (__cplusplus) >= 201103L /* C++11 */
+#define Z_THREAD_LOCAL thread_local
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__) >= 202311L /* C23 */
+#define Z_THREAD_LOCAL thread_local
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__) >= 201112L /* C11 */
+#define Z_THREAD_LOCAL _Thread_local
+#else /* Default back to old behavior which used the GNU keyword. */
+#define Z_THREAD_LOCAL __thread
+#endif
+#endif /* Z_THREAD_LOCAL */
 
 /*
  * Generate a reference to an external symbol.

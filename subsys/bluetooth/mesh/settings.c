@@ -12,6 +12,7 @@
 #include <zephyr/bluetooth/hci.h>
 
 #include <zephyr/settings/settings.h>
+#include <zephyr/bluetooth/mesh.h>
 
 #include "host/hci_core.h"
 #include "mesh.h"
@@ -28,7 +29,9 @@
 #include "pb_gatt_srv.h"
 #include "settings.h"
 #include "cfg.h"
+#include "brg_cfg.h"
 #include "solicitation.h"
+#include "va.h"
 
 #define LOG_LEVEL CONFIG_BT_MESH_SETTINGS_LOG_LEVEL
 #include <zephyr/logging/log.h>
@@ -86,7 +89,7 @@ static int mesh_commit(void)
 	}
 
 	if (!atomic_test_bit(bt_dev.flags, BT_DEV_ENABLE)) {
-		/* The Bluetooth mesh settings loader calls bt_mesh_start() immediately
+		/* The Bluetooth Mesh settings loader calls bt_mesh_start() immediately
 		 * after loading the settings. This is not intended to work before
 		 * bt_enable(). The doc on @ref bt_enable requires the "bt/" settings
 		 * tree to be loaded after @ref bt_enable is completed, so this handler
@@ -124,15 +127,12 @@ SETTINGS_STATIC_HANDLER_DEFINE(bt_mesh, "bt/mesh", NULL, NULL, mesh_commit,
 			      BIT(BT_MESH_SETTINGS_CDB_PENDING))
 
 /* Pending flags that use CONFIG_BT_MESH_STORE_TIMEOUT */
-#define GENERIC_PENDING_BITS (BIT(BT_MESH_SETTINGS_NET_KEYS_PENDING) |      \
-			      BIT(BT_MESH_SETTINGS_APP_KEYS_PENDING) |      \
-			      BIT(BT_MESH_SETTINGS_HB_PUB_PENDING)   |      \
-			      BIT(BT_MESH_SETTINGS_CFG_PENDING)      |      \
-			      BIT(BT_MESH_SETTINGS_MOD_PENDING)      |      \
-			      BIT(BT_MESH_SETTINGS_VA_PENDING)       |      \
-			      BIT(BT_MESH_SETTINGS_SSEQ_PENDING)     |      \
-			      BIT(BT_MESH_SETTINGS_COMP_PENDING)     |      \
-			      BIT(BT_MESH_SETTINGS_DEV_KEY_CAND_PENDING))
+#define GENERIC_PENDING_BITS                                                                       \
+	(BIT(BT_MESH_SETTINGS_NET_KEYS_PENDING) | BIT(BT_MESH_SETTINGS_APP_KEYS_PENDING) |         \
+	 BIT(BT_MESH_SETTINGS_HB_PUB_PENDING) | BIT(BT_MESH_SETTINGS_CFG_PENDING) |                \
+	 BIT(BT_MESH_SETTINGS_MOD_PENDING) | BIT(BT_MESH_SETTINGS_VA_PENDING) |                    \
+	 BIT(BT_MESH_SETTINGS_SSEQ_PENDING) | BIT(BT_MESH_SETTINGS_COMP_PENDING) |                 \
+	 BIT(BT_MESH_SETTINGS_DEV_KEY_CAND_PENDING) | BIT(BT_MESH_SETTINGS_BRG_PENDING))
 
 void bt_mesh_settings_store_schedule(enum bt_mesh_settings_flag flag)
 {
@@ -184,8 +184,7 @@ static void store_pending(struct k_work *work)
 {
 	LOG_DBG("");
 
-	if (IS_ENABLED(CONFIG_BT_MESH_RPL_STORAGE_MODE_SETTINGS) &&
-	    atomic_test_and_clear_bit(pending_flags, BT_MESH_SETTINGS_RPL_PENDING)) {
+	if (atomic_test_and_clear_bit(pending_flags, BT_MESH_SETTINGS_RPL_PENDING)) {
 		bt_mesh_rpl_pending_store(BT_MESH_ADDR_ALL_NODES);
 	}
 
@@ -260,6 +259,11 @@ static void store_pending(struct k_work *work)
 		atomic_test_and_clear_bit(pending_flags,
 					  BT_MESH_SETTINGS_SSEQ_PENDING)) {
 		bt_mesh_sseq_pending_store();
+	}
+
+	if (IS_ENABLED(CONFIG_BT_MESH_BRG_CFG_SRV) &&
+	    atomic_test_and_clear_bit(pending_flags, BT_MESH_SETTINGS_BRG_PENDING)) {
+		bt_mesh_brg_cfg_pending_store();
 	}
 }
 

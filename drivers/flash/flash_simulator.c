@@ -13,24 +13,15 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/random/rand32.h>
+#include <zephyr/random/random.h>
 #include <zephyr/stats/stats.h>
 #include <string.h>
 
 #ifdef CONFIG_ARCH_POSIX
 
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+#include "flash_simulator_native.h"
 #include "cmdline.h"
 #include "soc.h"
-
 #define DEFAULT_FLASH_FILE_PATH "flash.bin"
 
 #endif /* CONFIG_ARCH_POSIX */
@@ -171,7 +162,12 @@ static const struct flash_driver_api flash_sim_api;
 
 static const struct flash_parameters flash_sim_parameters = {
 	.write_block_size = FLASH_SIMULATOR_PROG_UNIT,
-	.erase_value = FLASH_SIMULATOR_ERASE_VALUE
+	.erase_value = FLASH_SIMULATOR_ERASE_VALUE,
+	.caps = {
+#if !defined(CONFIG_FLASH_SIMULATOR_EXPLICIT_ERASE)
+		.no_explicit_erase = false,
+#endif
+	},
 };
 
 static int flash_range_is_valid(const struct device *dev, off_t offset,
@@ -235,8 +231,12 @@ static int flash_sim_write(const struct device *dev, const off_t offset,
 
 	FLASH_SIM_STATS_INC(flash_sim_stats, flash_write_calls);
 
+#if defined(CONFIG_FLASH_SIMULATOR_EXPLICIT_ERASE)
 	/* check if any unit has been already programmed */
 	memset(buf, FLASH_SIMULATOR_ERASE_VALUE, sizeof(buf));
+#else
+	memcpy(buf, MOCK_FLASH(offset), sizeof(buf));
+#endif
 	for (uint32_t i = 0; i < len; i += FLASH_SIMULATOR_PROG_UNIT) {
 		if (memcmp(buf, MOCK_FLASH(offset + i), sizeof(buf))) {
 			FLASH_SIM_STATS_INC(flash_sim_stats, double_writes);
@@ -274,8 +274,12 @@ static int flash_sim_write(const struct device *dev, const off_t offset,
 #endif /* CONFIG_FLASH_SIMULATOR_STATS */
 
 		/* only pull bits to zero */
+#if defined(CONFIG_FLASH_SIMULATOR_EXPLICIT_ERASE)
 #if FLASH_SIMULATOR_ERASE_VALUE == 0xFF
 		*(MOCK_FLASH(offset + i)) &= *((uint8_t *)data + i);
+#else
+		*(MOCK_FLASH(offset + i)) |= *((uint8_t *)data + i);
+#endif
 #else
 		*(MOCK_FLASH(offset + i)) = *((uint8_t *)data + i);
 #endif
@@ -384,64 +388,22 @@ static const struct flash_driver_api flash_sim_api = {
 
 static int flash_mock_init(const struct device *dev)
 {
-	struct stat f_stat;
 	int rc;
-
 	ARG_UNUSED(dev);
 
-	if (flash_in_ram == true) {
-		mock_flash = (uint8_t *)malloc(FLASH_SIMULATOR_FLASH_SIZE);
-		if (mock_flash == NULL) {
-			posix_print_warning("Could not allocate flash in the process heap %s\n",
-					    strerror(errno));
-			return -EIO;
-		}
+	if (flash_in_ram == false && flash_file_path == NULL) {
+		flash_file_path = DEFAULT_FLASH_FILE_PATH;
+	}
+
+	rc = flash_mock_init_native(flash_in_ram, &mock_flash, FLASH_SIMULATOR_FLASH_SIZE,
+				    &flash_fd, flash_file_path, FLASH_SIMULATOR_ERASE_VALUE,
+				    flash_erase_at_start);
+
+	if (rc < 0) {
+		return -EIO;
 	} else {
-
-		if (flash_file_path == NULL) {
-			flash_file_path = DEFAULT_FLASH_FILE_PATH;
-		}
-
-		flash_fd = open(flash_file_path, O_RDWR | O_CREAT, (mode_t)0600);
-		if (flash_fd == -1) {
-			posix_print_warning("Failed to open flash device file "
-					"%s: %s\n",
-					flash_file_path, strerror(errno));
-			return -EIO;
-		}
-
-		rc = fstat(flash_fd, &f_stat);
-		if (rc) {
-			posix_print_warning("Failed to get status of flash device file "
-					"%s: %s\n",
-					flash_file_path, strerror(errno));
-			return -EIO;
-		}
-
-		if (ftruncate(flash_fd, FLASH_SIMULATOR_FLASH_SIZE) == -1) {
-			posix_print_warning("Failed to resize flash device file "
-					"%s: %s\n",
-					flash_file_path, strerror(errno));
-			return -EIO;
-		}
-
-		mock_flash = mmap(NULL, FLASH_SIMULATOR_FLASH_SIZE,
-				PROT_WRITE | PROT_READ, MAP_SHARED, flash_fd, 0);
-		if (mock_flash == MAP_FAILED) {
-			posix_print_warning("Failed to mmap flash device file "
-					"%s: %s\n",
-					flash_file_path, strerror(errno));
-			return -EIO;
-		}
+		return 0;
 	}
-
-	if ((flash_erase_at_start == true) || (flash_in_ram == true) || (f_stat.st_size == 0)) {
-		/* Erase the memory unit by pulling all bits to the configured erase value */
-		(void)memset(mock_flash, FLASH_SIMULATOR_ERASE_VALUE,
-				FLASH_SIMULATOR_FLASH_SIZE);
-	}
-
-	return 0;
 }
 
 #else
@@ -475,30 +437,14 @@ DEVICE_DT_INST_DEFINE(0, flash_init, NULL,
 
 #ifdef CONFIG_ARCH_POSIX
 
-static void flash_native_posix_cleanup(void)
+static void flash_native_cleanup(void)
 {
-	if (flash_in_ram == true) {
-		if (mock_flash != NULL) {
-			free(mock_flash);
-		}
-		return;
-	}
-
-	if ((mock_flash != MAP_FAILED) && (mock_flash != NULL)) {
-		munmap(mock_flash, FLASH_SIMULATOR_FLASH_SIZE);
-	}
-
-	if (flash_fd != -1) {
-		close(flash_fd);
-	}
-
-	if ((flash_rm_at_exit == true) && (flash_file_path != NULL)) {
-		/* We try to remove the file but do not error out if we can't */
-		(void) remove(flash_file_path);
-	}
+	flash_mock_cleanup_native(flash_in_ram, flash_fd, mock_flash,
+				  FLASH_SIMULATOR_FLASH_SIZE, flash_file_path,
+				  flash_rm_at_exit);
 }
 
-static void flash_native_posix_options(void)
+static void flash_native_options(void)
 {
 	static struct args_struct_t flash_options[] = {
 		{ .option = "flash",
@@ -530,9 +476,8 @@ static void flash_native_posix_options(void)
 	native_add_command_line_opts(flash_options);
 }
 
-
-NATIVE_TASK(flash_native_posix_options, PRE_BOOT_1, 1);
-NATIVE_TASK(flash_native_posix_cleanup, ON_EXIT, 1);
+NATIVE_TASK(flash_native_options, PRE_BOOT_1, 1);
+NATIVE_TASK(flash_native_cleanup, ON_EXIT, 1);
 
 #endif /* CONFIG_ARCH_POSIX */
 
@@ -548,16 +493,16 @@ void *z_impl_flash_simulator_get_memory(const struct device *dev,
 
 #ifdef CONFIG_USERSPACE
 
-#include <zephyr/syscall_handler.h>
+#include <zephyr/internal/syscall_handler.h>
 
 void *z_vrfy_flash_simulator_get_memory(const struct device *dev,
 				      size_t *mock_size)
 {
-	Z_OOPS(Z_SYSCALL_SPECIFIC_DRIVER(dev, K_OBJ_DRIVER_FLASH, &flash_sim_api));
+	K_OOPS(K_SYSCALL_SPECIFIC_DRIVER(dev, K_OBJ_DRIVER_FLASH, &flash_sim_api));
 
 	return z_impl_flash_simulator_get_memory(dev, mock_size);
 }
 
-#include <syscalls/flash_simulator_get_memory_mrsh.c>
+#include <zephyr/syscalls/flash_simulator_get_memory_mrsh.c>
 
 #endif /* CONFIG_USERSPACE */

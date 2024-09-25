@@ -34,9 +34,9 @@ static const uint8_t debug_public_key[BT_PUB_KEY_LEN] = {
 	0x6d, 0xeb, 0x2a, 0x65, 0x49, 0x9c, 0x80, 0xdc
 };
 
-bool bt_pub_key_is_debug(uint8_t *pub_key)
+bool bt_pub_key_is_debug(uint8_t *cmp_pub_key)
 {
-	return memcmp(pub_key, debug_public_key, BT_PUB_KEY_LEN) == 0;
+	return memcmp(cmp_pub_key, debug_public_key, BT_PUB_KEY_LEN) == 0;
 }
 
 int bt_pub_key_gen(struct bt_pub_key_cb *new_cb)
@@ -207,7 +207,7 @@ void bt_hci_evt_le_pkey_complete(struct net_buf *buf)
 	struct bt_hci_evt_le_p256_public_key_complete *evt = (void *)buf->data;
 	struct bt_pub_key_cb *cb;
 
-	LOG_DBG("status: 0x%02x", evt->status);
+	LOG_DBG("status: 0x%02x %s", evt->status, bt_hci_err_to_str(evt->status));
 
 	atomic_clear_bit(bt_dev.flags, BT_DEV_PUB_KEY_BUSY);
 
@@ -229,7 +229,7 @@ void bt_hci_evt_le_dhkey_complete(struct net_buf *buf)
 {
 	struct bt_hci_evt_le_generate_dhkey_complete *evt = (void *)buf->data;
 
-	LOG_DBG("status: 0x%02x", evt->status);
+	LOG_DBG("status: 0x%02x %s", evt->status, bt_hci_err_to_str(evt->status));
 
 	if (dh_key_cb) {
 		bt_dh_key_cb_t cb = dh_key_cb;

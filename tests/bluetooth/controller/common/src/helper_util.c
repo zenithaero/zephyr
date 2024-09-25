@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "zephyr/types.h"
-#include "zephyr/ztest.h"
+#include <zephyr/types.h>
+#include <zephyr/ztest.h>
 #include <stdlib.h>
 
 #include <zephyr/bluetooth/hci.h>
@@ -389,8 +389,9 @@ uint16_t event_counter(struct ll_conn *conn)
 	 * return the current event counter value (i.e. -1);
 	 * otherwise return the next event counter value
 	 */
-	if (*evt_active)
+	if (*evt_active) {
 		event_counter--;
+	}
 
 	return event_counter;
 }

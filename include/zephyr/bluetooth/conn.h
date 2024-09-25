@@ -21,7 +21,7 @@
 #include <stdint.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/hci_err.h>
+#include <zephyr/bluetooth/hci_types.h>
 #include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/gap.h>
 #include <zephyr/bluetooth/direction.h>
@@ -98,9 +98,9 @@ enum {
 
 /** Preferred PHY parameters for LE connections */
 struct bt_conn_le_phy_param {
-	uint16_t options;     /** Connection PHY options. */
-	uint8_t  pref_tx_phy; /** Bitmask of preferred transmit PHYs */
-	uint8_t  pref_rx_phy; /** Bitmask of preferred receive PHYs */
+	uint16_t options; /**< Connection PHY options. */
+	uint8_t  pref_tx_phy; /**< Bitmask of preferred transmit PHYs */
+	uint8_t  pref_rx_phy; /**< Bitmask of preferred receive PHYs */
 };
 
 /** Initialize PHY parameters
@@ -196,6 +196,223 @@ struct bt_conn_le_data_len_param {
 	BT_CONN_LE_DATA_LEN_PARAM(BT_GAP_DATA_LEN_MAX, \
 				  BT_GAP_DATA_TIME_MAX)
 
+/** Connection subrating parameters for LE connections */
+struct bt_conn_le_subrate_param {
+	/** Minimum subrate factor. */
+	uint16_t subrate_min;
+	/** Maximum subrate factor. */
+	uint16_t subrate_max;
+	/** Maximum Peripheral latency in units of subrated connection intervals. */
+	uint16_t max_latency;
+	/** Minimum number of underlying connection events to remain active
+	 *  after a packet containing a Link Layer PDU with a non-zero Length
+	 *  field is sent or received.
+	 */
+	uint16_t continuation_number;
+	/** Connection Supervision timeout (N * 10 ms).
+	 *  If using @ref bt_conn_le_subrate_set_defaults, this is the
+	 *  maximum supervision timeout allowed in requests by a peripheral.
+	 */
+	uint16_t supervision_timeout;
+};
+
+/** Subrating information for LE connections */
+struct bt_conn_le_subrating_info {
+	/** Connection subrate factor. */
+	uint16_t factor;
+	/** Number of underlying connection events to remain active after
+	 *  a packet containing a Link Layer PDU with a non-zero Length
+	 *  field is sent or received.
+	 */
+	uint16_t continuation_number;
+};
+
+/** Updated subrating connection parameters for LE connections */
+struct bt_conn_le_subrate_changed {
+	/** HCI Status from LE Subrate Changed event.
+	 *  The remaining parameters will be unchanged if status is not
+	 *  BT_HCI_ERR_SUCCESS.
+	 */
+	uint8_t status;
+	/** Connection subrate factor. */
+	uint16_t factor;
+	/** Number of underlying connection events to remain active after
+	 *  a packet containing a Link Layer PDU with a non-zero Length
+	 *  field is sent or received.
+	 */
+	uint16_t continuation_number;
+	/** Peripheral latency in units of subrated connection intervals. */
+	uint16_t peripheral_latency;
+	/** Connection Supervision timeout (N * 10 ms). */
+	uint16_t supervision_timeout;
+};
+
+/** Connection Type */
+enum __packed bt_conn_type {
+	/** LE Connection Type */
+	BT_CONN_TYPE_LE = BIT(0),
+	/** BR/EDR Connection Type */
+	BT_CONN_TYPE_BR = BIT(1),
+	/** SCO Connection Type */
+	BT_CONN_TYPE_SCO = BIT(2),
+	/** ISO Connection Type */
+	BT_CONN_TYPE_ISO = BIT(3),
+	/** All Connection Type */
+	BT_CONN_TYPE_ALL = BT_CONN_TYPE_LE | BT_CONN_TYPE_BR |
+			   BT_CONN_TYPE_SCO | BT_CONN_TYPE_ISO,
+};
+
+/** Supported AA-Only RTT precision. */
+enum bt_conn_le_cs_capability_rtt_aa_only {
+	/** AA-Only RTT variant is not supported. */
+	BT_CONN_LE_CS_RTT_AA_ONLY_NOT_SUPP = 0,
+	/** 10ns time-of-flight accuracy. */
+	BT_CONN_LE_CS_RTT_AA_ONLY_10NS,
+	/** 150ns time-of-flight accuracy. */
+	BT_CONN_LE_CS_RTT_AA_ONLY_150NS,
+};
+
+/** Supported Sounding Sequence RTT precision. */
+enum bt_conn_le_cs_capability_rtt_sounding {
+	/** Sounding Sequence RTT variant is not supported. */
+	BT_CONN_LE_CS_RTT_SOUNDING_NOT_SUPP = 0,
+	/** 10ns time-of-flight accuracy. */
+	BT_CONN_LE_CS_RTT_SOUNDING_10NS,
+	/** 150ns time-of-flight accuracy. */
+	BT_CONN_LE_CS_RTT_SOUNDING_150NS,
+};
+
+/** Supported Random Payload RTT precision. */
+enum bt_conn_le_cs_capability_rtt_random_payload {
+	/** Random Payload RTT variant is not supported. */
+	BT_CONN_LE_CS_RTT_RANDOM_PAYLOAD_NOT_SUPP = 0,
+	/** 10ns time-of-flight accuracy. */
+	BT_CONN_LE_CS_RTT_RANDOM_PAYLOAD_10NS,
+	/** 150ns time-of-flight accuracy. */
+	BT_CONN_LE_CS_RTT_RANDOM_PAYLOAD_150NS,
+};
+
+/** Remote channel sounding capabilities for LE connections supporting CS */
+struct bt_conn_le_cs_capabilities {
+	/** Number of CS configurations */
+	uint8_t num_config_supported;
+	/** Maximum number of consecutive CS procedures.
+	 *
+	 * When set to zero, indicates support for both fixed and indefinite
+	 * numbers of CS procedures before termination.
+	 */
+	uint16_t max_consecutive_procedures_supported;
+	/** Number of antennas. */
+	uint8_t num_antennas_supported;
+	/** Maximum number of antenna paths. */
+	uint8_t max_antenna_paths_supported;
+	/** Initiator role. */
+	bool initiator_supported;
+	/** Reflector role. */
+	bool reflector_supported;
+	/** Mode-3 */
+	bool mode_3_supported;
+	/** RTT AA-Only */
+	enum bt_conn_le_cs_capability_rtt_aa_only rtt_aa_only_precision;
+	/** RTT Sounding */
+	enum bt_conn_le_cs_capability_rtt_sounding rtt_sounding_precision;
+	/** RTT Random Payload */
+	enum bt_conn_le_cs_capability_rtt_random_payload rtt_random_payload_precision;
+	/** Number of CS steps needed to achieve the
+	 * accuracy requirements for RTT AA Only.
+	 *
+	 * Set to 0 if RTT AA Only isn't supported.
+	 */
+	uint8_t rtt_aa_only_n;
+	/** Number of CS steps needed to achieve the
+	 * accuracy requirements for RTT Sounding.
+	 *
+	 * Set to 0 if RTT Sounding isn't supported
+	 */
+	uint8_t rtt_sounding_n;
+	/** Number of CS steps needed to achieve the
+	 * accuracy requirements for RTT Random Payload.
+	 *
+	 * Set to 0 if RTT Random Payload isn't supported.
+	 */
+	uint8_t rtt_random_payload_n;
+	/** Phase-based normalized attack detector metric
+	 * when a CS_SYNC with sounding sequence is received.
+	 */
+	bool phase_based_nadm_sounding_supported;
+	/** Phase-based normalized attack detector metric
+	 * when a CS_SYNC with random sequence is received.
+	 */
+	bool phase_based_nadm_random_supported;
+	/** CS_SYNC LE 2M PHY. */
+	bool cs_sync_2m_phy_supported;
+	/** CS_SYNC LE 2M 2BT PHY. */
+	bool cs_sync_2m_2bt_phy_supported;
+	/** Subfeature: CS with no Frequency Actuation Error. */
+	bool cs_without_fae_supported;
+	/** Subfeature: Channel Selection Algorithm #3c */
+	bool chsel_alg_3c_supported;
+	/** Subfeature: Phase-based Ranging from RTT sounding sequence. */
+	bool pbr_from_rtt_sounding_seq_supported;
+	/** Optional T_IP1 time durations during CS steps.
+	 *
+	 *  - Bit 0: 10 us
+	 *  - Bit 1: 20 us
+	 *  - Bit 2: 30 us
+	 *  - Bit 3: 40 us
+	 *  - Bit 4: 50 us
+	 *  - Bit 5: 60 us
+	 *  - Bit 6: 80 us
+	 */
+	uint16_t t_ip1_times_supported;
+	/** Optional T_IP2 time durations during CS steps.
+	 *
+	 *  - Bit 0: 10 us
+	 *  - Bit 1: 20 us
+	 *  - Bit 2: 30 us
+	 *  - Bit 3: 40 us
+	 *  - Bit 4: 50 us
+	 *  - Bit 5: 60 us
+	 *  - Bit 6: 80 us
+	 */
+	uint16_t t_ip2_times_supported;
+	/** Optional T_FCS time durations during CS steps.
+	 *
+	 *  - Bit 0: 15 us
+	 *  - Bit 1: 20 us
+	 *  - Bit 2: 30 us
+	 *  - Bit 3: 40 us
+	 *  - Bit 4: 50 us
+	 *  - Bit 5: 60 us
+	 *  - Bit 6: 80 us
+	 *  - Bit 7: 100 us
+	 *  - Bit 8: 120 us
+	 */
+	uint16_t t_fcs_times_supported;
+	/** Optional T_PM time durations during CS steps.
+	 *
+	 *  - Bit 0: 10 us
+	 *  - Bit 1: 20 us
+	 */
+	uint16_t t_pm_times_supported;
+	/** Time in microseconds for the antenna switch period of the CS tones. */
+	uint8_t t_sw_time;
+	/** Supported SNR levels used in RTT packets.
+	 *
+	 *  - Bit 0: 18dB
+	 *  - Bit 1: 21dB
+	 *  - Bit 2: 24dB
+	 *  - Bit 3: 27dB
+	 *  - Bit 4: 30dB
+	 */
+	uint8_t tx_snr_capability;
+};
+
+/** Remote FAE Table for LE connections supporting CS */
+struct bt_conn_le_cs_fae_table {
+	uint8_t *remote_fae_table;
+};
+
 /** @brief Increment a connection's reference count.
  *
  *  Increment the reference count of a connection object.
@@ -219,7 +436,7 @@ void bt_conn_unref(struct bt_conn *conn);
 
 /** @brief Iterate through all bt_conn objects.
  *
- * Iterates trough all bt_conn objects that are alive in the Host allocator.
+ * Iterates through all bt_conn objects that are alive in the Host allocator.
  *
  * To find established connections, combine this with @ref bt_conn_get_info.
  * Check that @ref bt_conn_info.state is @ref BT_CONN_STATE_CONNECTED.
@@ -233,7 +450,8 @@ void bt_conn_unref(struct bt_conn *conn);
  * @param func  Function to call for each connection.
  * @param data  Data to pass to the callback function.
  */
-void bt_conn_foreach(int type, void (*func)(struct bt_conn *conn, void *data),
+void bt_conn_foreach(enum bt_conn_type type,
+		     void (*func)(struct bt_conn *conn, void *data),
 		     void *data);
 
 /** @brief Look up an existing connection by address.
@@ -270,21 +488,6 @@ const bt_addr_le_t *bt_conn_get_dst(const struct bt_conn *conn);
  */
 uint8_t bt_conn_index(const struct bt_conn *conn);
 
-/** Connection Type */
-enum {
-	/** LE Connection Type */
-	BT_CONN_TYPE_LE = BIT(0),
-	/** BR/EDR Connection Type */
-	BT_CONN_TYPE_BR = BIT(1),
-	/** SCO Connection Type */
-	BT_CONN_TYPE_SCO = BIT(2),
-	/** ISO Connection Type */
-	BT_CONN_TYPE_ISO = BIT(3),
-	/** All Connection Type */
-	BT_CONN_TYPE_ALL = BT_CONN_TYPE_LE | BT_CONN_TYPE_BR |
-			   BT_CONN_TYPE_SCO | BT_CONN_TYPE_ISO,
-};
-
 /** LE Connection Info Structure */
 struct bt_conn_le_info {
 	/** Source (Local) Identity Address */
@@ -297,9 +500,9 @@ struct bt_conn_le_info {
 	const bt_addr_le_t *local;
 	/** Remote device address used during connection setup. */
 	const bt_addr_le_t *remote;
-	uint16_t interval; /** Connection interval */
-	uint16_t latency; /** Connection peripheral latency */
-	uint16_t timeout; /** Connection supervision timeout */
+	uint16_t interval; /**< Connection interval */
+	uint16_t latency; /**< Connection peripheral latency */
+	uint16_t timeout; /**< Connection supervision timeout */
 
 #if defined(CONFIG_BT_USER_PHY_UPDATE)
 	const struct bt_conn_le_phy_info      *phy;
@@ -309,6 +512,11 @@ struct bt_conn_le_info {
 	/* Connection maximum single fragment parameters */
 	const struct bt_conn_le_data_len_info *data_len;
 #endif /* defined(CONFIG_BT_USER_DATA_LEN_UPDATE) */
+
+#if defined(CONFIG_BT_SUBRATING)
+	/* Connection subrating parameters */
+	const struct bt_conn_le_subrating_info *subrate;
+#endif /* defined(CONFIG_BT_SUBRATING) */
 };
 
 /** @brief Convert connection interval to milliseconds
@@ -328,7 +536,7 @@ struct bt_conn_le_info {
 
 /** BR/EDR Connection Info Structure */
 struct bt_conn_br_info {
-	const bt_addr_t *dst; /** Destination (Remote) BR/EDR address */
+	const bt_addr_t *dst; /**< Destination (Remote) BR/EDR address */
 };
 
 enum {
@@ -383,14 +591,10 @@ struct bt_security_info {
 	enum bt_security_flag flags;
 };
 
-/** Connection role (central or peripheral) */
-#define BT_CONN_ROLE_MASTER __DEPRECATED_MACRO BT_CONN_ROLE_CENTRAL
-#define BT_CONN_ROLE_SLAVE __DEPRECATED_MACRO BT_CONN_ROLE_PERIPHERAL
-
 /** Connection Info Structure */
 struct bt_conn_info {
 	/** Connection Type. */
-	uint8_t type;
+	enum bt_conn_type type;
 	/** Connection Role. */
 	uint8_t role;
 	/** Which local identity the connection was created with */
@@ -478,6 +682,93 @@ struct bt_conn_le_tx_power {
 	int8_t max_level;
 };
 
+
+/** LE Transmit Power Reporting Structure */
+struct bt_conn_le_tx_power_report {
+
+	/** Reason for Transmit power reporting,
+	 * as documented in Core Spec. Version 5.4 Vol. 4, Part E, 7.7.65.33.
+	 */
+	uint8_t reason;
+
+	/** Phy of Transmit power reporting. */
+	enum bt_conn_le_tx_power_phy phy;
+
+	/** Transmit power level
+	 * - 0xXX - Transmit power level
+	 *  + Range: -127 to 20
+	 *  + Units: dBm
+	 *
+	 * - 0x7E - Remote device is not managing power levels on this PHY.
+	 * - 0x7F - Transmit power level is not available
+	 */
+	int8_t tx_power_level;
+
+	/** Bit 0: Transmit power level is at minimum level.
+	 *  Bit 1: Transmit power level is at maximum level.
+	 */
+	uint8_t tx_power_level_flag;
+
+	/** Change in transmit power level
+	 * - 0xXX - Change in transmit power level (positive indicates increased
+	 *   power, negative indicates decreased power, zero indicates unchanged)
+	 *   Units: dB
+	 * - 0x7F - Change is not available or is out of range.
+	 */
+	int8_t delta;
+};
+
+/** @brief Path Loss zone that has been entered.
+ *
+ *  The path loss zone that has been entered in the most recent LE Path Loss Monitoring
+ *  Threshold Change event as documented in Core Spec. Version 5.4 Vol.4, Part E, 7.7.65.32.
+ *
+ *  @note BT_CONN_LE_PATH_LOSS_ZONE_UNAVAILABLE has been added to notify when path loss becomes
+ *        unavailable.
+ */
+enum bt_conn_le_path_loss_zone {
+	/** Low path loss zone entered. */
+	BT_CONN_LE_PATH_LOSS_ZONE_ENTERED_LOW,
+	/** Middle path loss zone entered. */
+	BT_CONN_LE_PATH_LOSS_ZONE_ENTERED_MIDDLE,
+	/** High path loss zone entered. */
+	BT_CONN_LE_PATH_LOSS_ZONE_ENTERED_HIGH,
+	/** Path loss has become unavailable. */
+	BT_CONN_LE_PATH_LOSS_ZONE_UNAVAILABLE,
+};
+
+BUILD_ASSERT(BT_CONN_LE_PATH_LOSS_ZONE_ENTERED_LOW == BT_HCI_LE_ZONE_ENTERED_LOW);
+BUILD_ASSERT(BT_CONN_LE_PATH_LOSS_ZONE_ENTERED_MIDDLE == BT_HCI_LE_ZONE_ENTERED_MIDDLE);
+BUILD_ASSERT(BT_CONN_LE_PATH_LOSS_ZONE_ENTERED_HIGH == BT_HCI_LE_ZONE_ENTERED_HIGH);
+
+/** @brief LE Path Loss Monitoring Threshold Change Report Structure. */
+struct bt_conn_le_path_loss_threshold_report {
+
+	/** Path Loss zone as documented in Core Spec. Version 5.4 Vol.4, Part E, 7.7.65.32. */
+	enum bt_conn_le_path_loss_zone zone;
+
+	/** Current path loss (dB). */
+	uint8_t path_loss;
+};
+
+/** @brief LE Path Loss Monitoring Parameters Structure as defined in Core Spec. Version 5.4
+ *         Vol.4, Part E, 7.8.119 LE Set Path Loss Reporting Parameters command.
+ */
+struct bt_conn_le_path_loss_reporting_param {
+	/** High threshold for the path loss (dB). */
+	uint8_t high_threshold;
+	/** Hysteresis value for the high threshold (dB). */
+	uint8_t high_hysteresis;
+	/** Low threshold for the path loss (dB). */
+	uint8_t low_threshold;
+	/** Hysteresis value for the low threshold (dB). */
+	uint8_t low_hysteresis;
+	/** Minimum time in number of connection events to be observed once the
+	 *  path loss crosses the threshold before an event is generated.
+	 */
+	uint16_t min_time_spent;
+};
+
 /** @brief Passkey Keypress Notification type
  *
  *  The numeric values are the same as in the Core specification for Pairing
@@ -528,6 +819,99 @@ int bt_conn_get_remote_info(struct bt_conn *conn,
  */
 int bt_conn_le_get_tx_power_level(struct bt_conn *conn,
 				  struct bt_conn_le_tx_power *tx_power_level);
+
+/** @brief Get local enhanced connection transmit power level.
+ *
+ *  @param conn           Connection object.
+ *  @param tx_power       Transmit power level descriptor.
+ *
+ *  @return Zero on success or (negative) error code on failure.
+ *  @retval -ENOBUFS HCI command buffer is not available.
+ */
+int bt_conn_le_enhanced_get_tx_power_level(struct bt_conn *conn,
+					   struct bt_conn_le_tx_power *tx_power);
+
+/** @brief Get remote (peer) transmit power level.
+ *
+ *  @param conn           Connection object.
+ *  @param phy            PHY information.
+ *
+ *  @return Zero on success or (negative) error code on failure.
+ *  @retval -ENOBUFS HCI command buffer is not available.
+ */
+int bt_conn_le_get_remote_tx_power_level(struct bt_conn *conn,
+					 enum bt_conn_le_tx_power_phy phy);
+
+/** @brief Enable transmit power reporting.
+ *
+ *  @param conn           Connection object.
+ *  @param local_enable   Enable/disable reporting for local.
+ *  @param remote_enable  Enable/disable reporting for remote.
+ *
+ *  @return Zero on success or (negative) error code on failure.
+ *  @retval -ENOBUFS HCI command buffer is not available.
+ */
+int bt_conn_le_set_tx_power_report_enable(struct bt_conn *conn,
+					  bool local_enable,
+					  bool remote_enable);
+
+/** @brief Set Path Loss Monitoring Parameters.
+ *
+ *  Change the configuration for path loss threshold change events for a given conn handle.
+ *
+ *  @note To use this API @kconfig{CONFIG_BT_PATH_LOSS_MONITORING} must be set.
+ *
+ *  @param conn  Connection object.
+ *  @param param Path Loss Monitoring parameters
+ *
+ *  @return Zero on success or (negative) error code on failure.
+ */
+int bt_conn_le_set_path_loss_mon_param(struct bt_conn *conn,
+				       const struct bt_conn_le_path_loss_reporting_param *param);
+
+/** @brief Enable or Disable Path Loss Monitoring.
+ *
+ * Enable or disable Path Loss Monitoring, which will decide whether Path Loss Threshold events
+ * are sent from the controller to the host.
+ *
+ * @note To use this API @kconfig{CONFIG_BT_PATH_LOSS_MONITORING} must be set.
+ *
+ * @param conn   Connection Object.
+ * @param enable Enable/disable path loss reporting.
+ *
+ * @return Zero on success or (negative) error code on failure.
+ */
+int bt_conn_le_set_path_loss_mon_enable(struct bt_conn *conn, bool enable);
+
+/** @brief Set Default Connection Subrating Parameters.
+ *
+ *  Change the default subrating parameters for all future
+ *  ACL connections where the local device is the central.
+ *  This command does not affect any existing connection.
+ *  Parameters set for specific connection will always have precedence.
+ *
+ *  @note To use this API @kconfig{CONFIG_BT_SUBRATING} and
+ *        @kconfig{CONFIG_BT_CENTRAL} must be set.
+ *
+ *  @param params Subrating parameters.
+ *
+ *  @return Zero on success or (negative) error code on failure.
+ */
+int bt_conn_le_subrate_set_defaults(const struct bt_conn_le_subrate_param *params);
+
+/** @brief Request New Subrating Parameters.
+ *
+ *  Request a change to the subrating parameters of a connection.
+ *
+ *  @note To use this API @kconfig{CONFIG_BT_SUBRATING} must be set.
+ *
+ *  @param conn   Connection object.
+ *  @param params Subrating parameters.
+ *
+ *  @return Zero on success or (negative) error code on failure.
+ */
+int bt_conn_le_subrate_request(struct bt_conn *conn,
+			       const struct bt_conn_le_subrate_param *params);
 
 /** @brief Update the connection parameters.
  *
@@ -614,10 +998,24 @@ struct bt_conn_le_create_param {
 	/** Bit-field of create connection options. */
 	uint32_t options;
 
-	/** Scan interval (N * 0.625 ms) */
+	/** Scan interval (N * 0.625 ms)
+	 *
+	 * @note When @kconfig{CONFIG_BT_SCAN_AND_INITIATE_IN_PARALLEL} is enabled
+	 *       and the application wants to scan and connect in parallel,
+	 *       the Bluetooth Controller may require the scan interval used
+	 *       for scanning and connection establishment to be equal to
+	 *       obtain the best performance.
+	 */
 	uint16_t interval;
 
-	/** Scan window (N * 0.625 ms) */
+	/** Scan window (N * 0.625 ms)
+	 *
+	 * @note When @kconfig{CONFIG_BT_SCAN_AND_INITIATE_IN_PARALLEL} is enabled
+	 *       and the application wants to scan and connect in parallel,
+	 *       the Bluetooth Controller may require the scan window used
+	 *       for scanning and connection establishment to be equal to
+	 *       obtain the best performance.
+	 */
 	uint16_t window;
 
 	/** @brief Scan interval LE Coded PHY (N * 0.625 MS)
@@ -696,7 +1094,8 @@ struct bt_conn_le_create_param {
  *  This uses the General Connection Establishment procedure.
  *
  *  The application must disable explicit scanning before initiating
- *  a new LE connection.
+ *  a new LE connection if @kconfig{CONFIG_BT_SCAN_AND_INITIATE_IN_PARALLEL}
+ *  is not enabled.
  *
  *  @param[in]  peer         Remote address.
  *  @param[in]  create_param Create connection parameters.
@@ -744,12 +1143,12 @@ int bt_conn_le_create_synced(const struct bt_le_ext_adv *adv,
 			     const struct bt_conn_le_create_synced_param *synced_param,
 			     const struct bt_le_conn_param *conn_param, struct bt_conn **conn);
 
-/** @brief Automatically connect to remote devices in the filter accept list..
+/** @brief Automatically connect to remote devices in the filter accept list.
  *
  *  This uses the Auto Connection Establishment procedure.
  *  The procedure will continue until a single connection is established or the
  *  procedure is stopped through @ref bt_conn_create_auto_stop.
- *  To establish connections to all devices in the the filter accept list the
+ *  To establish connections to all devices in the filter accept list the
  *  procedure should be started again in the connected callback after a
  *  new connection has been established.
  *
@@ -799,11 +1198,12 @@ int bt_le_set_auto_conn(const bt_addr_le_t *addr,
  *  the device has bond information or is already paired and the keys are too
  *  weak then the pairing procedure will be initiated.
  *
- *  This function may return error if required level of security is not possible
- *  to achieve due to local or remote device limitation (e.g., input output
- *  capabilities), or if the maximum number of paired devices has been reached.
+ *  This function may return an error if the required level of security defined using
+ *  @p sec is not possible to achieve due to local or remote device limitation
+ *  (e.g., input output capabilities), or if the maximum number of paired devices
+ *  has been reached.
  *
- *  This function may return error if the pairing procedure has already been
+ *  This function may return an error if the pairing procedure has already been
  *  initiated by the local device or the peer device.
  *
  *  @note When @kconfig{CONFIG_BT_SMP_SC_ONLY} is enabled then the security
@@ -812,8 +1212,11 @@ int bt_le_set_auto_conn(const bt_addr_le_t *addr,
  *  @note When @kconfig{CONFIG_BT_SMP_OOB_LEGACY_PAIR_ONLY} is enabled then the
  *        security level will always be level 3.
  *
+ *  @note When @ref BT_SECURITY_FORCE_PAIR within @p sec is enabled then the pairing
+ *        procedure will always be initiated.
+ *
  *  @param conn Connection object.
- *  @param sec Requested security level.
+ *  @param sec Requested minimum security level.
  *
  *  @return 0 on success or negative error
  */
@@ -924,6 +1327,20 @@ struct bt_conn_cb {
 	 */
 	void (*disconnected)(struct bt_conn *conn, uint8_t reason);
 
+	/** @brief A connection object has been returned to the pool.
+	 *
+	 * This callback notifies the application that it might be able to
+	 * allocate a connection object. No guarantee, first come, first serve.
+	 *
+	 * Use this to e.g. re-start connectable advertising or scanning.
+	 *
+	 * Treat this callback as an ISR, as it originates from
+	 * @ref bt_conn_unref which is used by the BT stack. Making
+	 * Bluetooth API calls in this context is error-prone and strongly
+	 * discouraged.
+	 */
+	void (*recycled)(void);
+
 	/** @brief LE connection parameter update request.
 	 *
 	 *  This callback notifies the application that a remote device
@@ -977,7 +1394,7 @@ struct bt_conn_cb {
 				  const bt_addr_le_t *rpa,
 				  const bt_addr_le_t *identity);
 #endif /* CONFIG_BT_SMP */
-#if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_BREDR)
+#if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_CLASSIC)
 	/** @brief The security level of a connection has changed.
 	 *
 	 *  This callback notifies the application that the security of a
@@ -996,7 +1413,7 @@ struct bt_conn_cb {
 	 */
 	void (*security_changed)(struct bt_conn *conn, bt_security_t level,
 				 enum bt_security_err err);
-#endif /* defined(CONFIG_BT_SMP) || defined(CONFIG_BT_BREDR) */
+#endif /* defined(CONFIG_BT_SMP) || defined(CONFIG_BT_CLASSIC) */
 
 #if defined(CONFIG_BT_REMOTE_INFO)
 	/** @brief Remote information procedures has completed.
@@ -1048,7 +1465,77 @@ struct bt_conn_cb {
 			      const struct bt_df_conn_iq_samples_report *iq_report);
 #endif /* CONFIG_BT_DF_CONNECTION_CTE_RX */
 
-	struct bt_conn_cb *_next;
+#if defined(CONFIG_BT_TRANSMIT_POWER_CONTROL)
+	/** @brief LE Read Remote Transmit Power Level procedure has completed or LE
+	 *  Transmit Power Reporting event.
+	 *
+	 *  This callback notifies the application that either the remote transmit power level
+	 *  has been read from the peer or transmit power level has changed for the local or
+	 *  remote controller when transmit power reporting is enabled for the respective side
+	 *  using @ref bt_conn_le_set_tx_power_report_enable.
+	 *
+	 *  @param conn Connection object.
+	 *  @param report Transmit power report.
+	 */
+	void (*tx_power_report)(struct bt_conn *conn,
+				const struct bt_conn_le_tx_power_report *report);
+#endif /* CONFIG_BT_TRANSMIT_POWER_CONTROL */
+
+#if defined(CONFIG_BT_PATH_LOSS_MONITORING)
+	/** @brief LE Path Loss Threshold event.
+	 *
+	 *  This callback notifies the application that there has been a path loss threshold
+	 *  crossing or reporting the initial path loss threshold zone after using
+	 *  @ref bt_conn_le_set_path_loss_mon_enable.
+	 *
+	 *  @param conn Connection object.
+	 *  @param report Path loss threshold report.
+	 */
+	void (*path_loss_threshold_report)(struct bt_conn *conn,
+				const struct bt_conn_le_path_loss_threshold_report *report);
+#endif /* CONFIG_BT_PATH_LOSS_MONITORING */
+
+#if defined(CONFIG_BT_SUBRATING)
+	/** @brief LE Subrate Changed event.
+	 *
+	 *  This callback notifies the application that the subrating parameters
+	 *  of the connection may have changed.
+	 *  The connection subrating parameters will be unchanged
+	 *  if status is not BT_HCI_ERR_SUCCESS.
+	 *
+	 *  @param conn   Connection object.
+	 *  @param params New subrating parameters.
+	 */
+	void (*subrate_changed)(struct bt_conn *conn,
+				const struct bt_conn_le_subrate_changed *params);
+#endif /* CONFIG_BT_SUBRATING */
+
+#if defined(CONFIG_BT_CHANNEL_SOUNDING)
+	/** @brief LE CS Read Remote Supported Capabilities Complete event.
+	 *
+	 *  This callback notifies the application that the remote channel
+	 *  sounding capabilities have been received from the peer.
+	 *
+	 *  @param conn Connection object.
+	 *  @param remote_cs_capabilities Remote Channel Sounding Capabilities.
+	 */
+	void (*remote_cs_capabilities_available)(struct bt_conn *conn,
+						 struct bt_conn_le_cs_capabilities *params);
+
+	/** @brief LE CS Read Remote FAE Table Complete event.
+	 *
+	 *  This callback notifies the application that the remote mode-0
+	 *  FAE Table has been received from the peer.
+	 *
+	 *  @param conn Connection object.
+	 *  @param params FAE Table.
+	 */
+	void (*remote_cs_fae_table_available)(struct bt_conn *conn,
+					      struct bt_conn_le_cs_fae_table *params);
+#endif
+
+	/** @internal Internally used field for list handling */
+	sys_snode_t _node;
 };
 
 /** @brief Register connection callbacks.
@@ -1056,8 +1543,24 @@ struct bt_conn_cb {
  *  Register callbacks to monitor the state of connections.
  *
  *  @param cb Callback struct. Must point to memory that remains valid.
+ *
+ * @retval 0 Success.
+ * @retval -EEXIST if @p cb was already registered.
  */
-void bt_conn_cb_register(struct bt_conn_cb *cb);
+int bt_conn_cb_register(struct bt_conn_cb *cb);
+
+/**
+ * @brief Unregister connection callbacks.
+ *
+ * Unregister the state of connections callbacks.
+ *
+ * @param cb Callback struct point to memory that remains valid.
+ *
+ * @retval 0 Success
+ * @retval -EINVAL If @p cb is NULL
+ * @retval -ENOENT if @p cb was not registered
+ */
+int bt_conn_cb_unregister(struct bt_conn_cb *cb);
 
 /**
  *  @brief Register a callback structure for connection events.
@@ -1068,6 +1571,23 @@ void bt_conn_cb_register(struct bt_conn_cb *cb);
 	static const STRUCT_SECTION_ITERABLE(bt_conn_cb,		\
 						_CONCAT(bt_conn_cb_,	\
 							_name))
+
+/** Converts a security error to string.
+ *
+ * @return The string representation of the security error code.
+ *         If @kconfig{CONFIG_BT_SECURITY_ERR_TO_STR} is not enabled,
+ *         this just returns the empty string
+ */
+#if defined(CONFIG_BT_SECURITY_ERR_TO_STR)
+const char *bt_security_err_to_str(enum bt_security_err err);
+#else
+static inline const char *bt_security_err_to_str(enum bt_security_err err)
+{
+	ARG_UNUSED(err);
+
+	return "";
+}
+#endif
 
 /** @brief Enable/disable bonding.
  *
@@ -1080,6 +1600,26 @@ void bt_conn_cb_register(struct bt_conn_cb *cb);
  *  @param enable Value allowing/disallowing to be bondable.
  */
 void bt_set_bondable(bool enable);
+
+/** @brief Set/clear the bonding flag for a given connection.
+ *
+ *  Set/clear the Bonding flag in the Authentication Requirements of
+ *  SMP Pairing Request/Response data for a given connection.
+ *
+ *  The bonding flag for a given connection cannot be set/cleared if
+ *  security procedures in the SMP module have already started.
+ *  This function can be called only once per connection.
+ *
+ *  If the bonding flag is not set/cleared for a given connection,
+ *  the value will depend on global configuration which is set using
+ *  bt_set_bondable.
+ *  The default value of the global configuration is defined using
+ *  CONFIG_BT_BONDABLE Kconfig option.
+ *
+ *  @param conn Connection object.
+ *  @param enable Value allowing/disallowing to be bondable.
+ */
+int bt_conn_set_bondable(struct bt_conn *conn, bool enable);
 
 /** @brief Allow/disallow remote LE SC OOB data to be used for pairing.
  *
@@ -1412,7 +1952,7 @@ struct bt_conn_auth_cb {
 	 */
 	void (*pairing_confirm)(struct bt_conn *conn);
 
-#if defined(CONFIG_BT_BREDR)
+#if defined(CONFIG_BT_CLASSIC)
 	/** @brief Request the user to enter a passkey.
 	 *
 	 *  This callback will be called for a BR/EDR (Bluetooth Classic)
@@ -1634,19 +2174,6 @@ struct bt_br_conn_param {
  */
 struct bt_conn *bt_conn_create_br(const bt_addr_t *peer,
 				  const struct bt_br_conn_param *param);
-
-/** @brief Initiate an SCO connection to a remote device.
- *
- *  Allows initiate new SCO link to remote peer using its address.
- *
- *  The caller gets a new reference to the connection object which must be
- *  released with bt_conn_unref() once done using the object.
- *
- *  @param peer  Remote address.
- *
- *  @return Valid connection object on success or NULL otherwise.
- */
-struct bt_conn *bt_conn_create_sco(const bt_addr_t *peer);
 
 #ifdef __cplusplus
 }

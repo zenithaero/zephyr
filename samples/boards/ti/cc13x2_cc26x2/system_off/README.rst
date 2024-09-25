@@ -1,7 +1,7 @@
-.. _ti-cc13x2_cc26x2-system-off-sample:
+.. zephyr:code-sample:: ti_cc13x2_cc26x2_system_off
+   :name: CC13x2/CC26x2 System Off
 
-cc13x2_cc26x2 System Off demo
-#############################
+   Exercise the various sleep modes on TI CC13x2/CC26x2 platforms.
 
 Overview
 ********
@@ -28,7 +28,7 @@ Building, Flashing and Running
 ******************************
 
 .. zephyr-app-commands::
-   :zephyr-app: samples/boards/cc13x2_cc26x2/system_off
+   :zephyr-app: samples/boards/ti/cc13x2_cc26x2/system_off
    :board: cc1352r1_launchxl
    :goals: build flash
    :compact:

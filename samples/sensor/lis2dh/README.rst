@@ -1,7 +1,8 @@
-.. _lis2dh:
+.. zephyr:code-sample:: lis2dh
+   :name: LIS2DH Motion Sensor
+   :relevant-api: sensor_interface
 
-LIS2DH: Motion Sensor Monitor
-#############################
+   Get accelerometer data from an LIS2DH sensor (polling & trigger mode).
 
 Overview
 ********
@@ -20,7 +21,7 @@ References
 **********
 
 For more information about the LIS2DH motion sensor see
-http://www.st.com/en/mems-and-sensors/lis2dh.html.
+https://www.st.com/en/mems-and-sensors/lis2dh.html.
 
 Building and Running
 ********************

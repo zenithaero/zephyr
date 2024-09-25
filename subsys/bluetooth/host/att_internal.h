@@ -270,7 +270,7 @@ struct bt_att_signed_write_cmd {
 	uint8_t  value[0];
 } __packed;
 
-typedef void (*bt_att_func_t)(struct bt_conn *conn, uint8_t err,
+typedef void (*bt_att_func_t)(struct bt_conn *conn, int err,
 			      const void *pdu, uint16_t length,
 			      void *user_data);
 
@@ -291,10 +291,9 @@ struct bt_att_req {
 	void *user_data;
 };
 
-void att_sent(struct bt_conn *conn, void *user_data);
-
 void bt_att_init(void);
 uint16_t bt_att_get_mtu(struct bt_conn *conn);
+uint16_t bt_att_get_uatt_mtu(struct bt_conn *conn);
 struct net_buf *bt_att_create_pdu(struct bt_conn *conn, uint8_t op,
 				  size_t len);
 
@@ -340,8 +339,6 @@ void bt_att_increment_tx_meta_data_attr_count(struct net_buf *buf, uint16_t attr
 bool bt_att_tx_meta_data_match(const struct net_buf *buf, bt_gatt_complete_func_t func,
 			       const void *user_data, enum bt_att_chan_opt chan_opt);
 
-void bt_att_free_tx_meta_data(const struct net_buf *buf);
-
 #if defined(CONFIG_BT_EATT)
 #define BT_ATT_CHAN_OPT(_params) (_params)->chan_opt
 #else
@@ -349,3 +346,5 @@ void bt_att_free_tx_meta_data(const struct net_buf *buf);
 #endif /* CONFIG_BT_EATT */
 
 bool bt_att_chan_opt_valid(struct bt_conn *conn, enum bt_att_chan_opt chan_opt);
+
+void bt_gatt_req_set_mtu(struct bt_att_req *req, uint16_t mtu);

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2023 Benjamin Björnsson <benjamin.bjornsson@gmail.com>
+ * Copyright (c) 2024 STMicroelectronics
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -62,6 +63,18 @@
 			#clock-cells = <0>;
 			compatible = "fixed-clock";
 			clock-frequency = <DT_FREQ_K(32)>;
+			status = "disabled";
+		};
+	};
+
+	mcos {
+		mco1: mco1 {
+			compatible = "st,stm32-clock-mco";
+			status = "disabled";
+		};
+
+		mco2: mco2 {
+			compatible = "st,stm32-clock-mco";
 			status = "disabled";
 		};
 	};
@@ -154,6 +167,8 @@
 			interrupts = <2 0>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00000400>;
 			prescaler = <32768>;
+			alarms-count = <1>;
+			alrm-exti-line = <19>;
 			status = "disabled";
 		};
 
@@ -293,14 +308,13 @@
 			interrupts = <12 0>;
 			status = "disabled";
 			#io-channel-cells = <1>;
-			temp-channel = <9>;
-			vref-channel = <10>;
 			resolutions = <STM32_ADC_RES(12, 0x00)
 				       STM32_ADC_RES(10, 0x01)
 				       STM32_ADC_RES(8, 0x02)
 				       STM32_ADC_RES(6, 0x03)>;
 			sampling-times = <2 4 8 13 20 40 80 161>;
 			num-sampling-time-common-channels = <2>;
+			st,adc-sequencer = <NOT_FULLY_CONFIGURABLE>;
 		};
 
 		dma1: dma@40020000 {
@@ -342,6 +356,14 @@
 		vrefint-cal-addr = <0x1FFF756A>;
 		vrefint-cal-mv = <3000>;
 		io-channels = <&adc1 10>;
+		status = "disabled";
+	};
+
+	smbus1: smbus1 {
+		compatible = "st,stm32-smbus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c = <&i2c1>;
 		status = "disabled";
 	};
 };

@@ -3,6 +3,7 @@
 # Copyright (c) 2018-2022 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+from enum import Enum
 import os
 from pathlib import Path
 import re
@@ -11,9 +12,11 @@ import contextlib
 import mmap
 import glob
 from typing import List
+
 from twisterlib.mixins import DisablePyTestCollectionMixin
 from twisterlib.environment import canonical_zephyr_base
-from twisterlib.error import TwisterException, TwisterRuntimeError
+from twisterlib.error import StatusAttributeError, TwisterException, TwisterRuntimeError
+from twisterlib.statuses import TwisterStatus
 
 logger = logging.getLogger('twister')
 logger.setLevel(logging.DEBUG)
@@ -82,10 +85,10 @@ def scan_file(inf_name):
         re.MULTILINE)
     # Checks if the file contains a definition of "void test_main(void)"
     # Since ztest provides a plain test_main implementation it is OK to:
-    # 1. register test suites and not call the run function iff the test
-    #    doesn't have a custom test_main.
-    # 2. register test suites and a custom test_main definition iff the test
-    #    also calls ztest_run_registered_test_suites.
+    # 1. register test suites and not call the run function if and only if
+    #    the test doesn't have a custom test_main.
+    # 2. register test suites and a custom test_main definition if and only if
+    #    the test also calls ztest_run_registered_test_suites.
     test_main_regex = re.compile(
         br"^\s*void\s+test_main\(void\)",
         re.MULTILINE)
@@ -256,6 +259,28 @@ def _find_ztest_testcases(search_area, testcase_regex):
 
     return testcase_names, warnings
 
+def find_c_files_in(path: str, extensions: list = ['c', 'cpp', 'cxx', 'cc']) -> list:
+    """
+    Find C or C++ sources in the directory specified by "path"
+    """
+    if not os.path.isdir(path):
+        return []
+
+    # back up previous CWD
+    oldpwd = os.getcwd()
+    os.chdir(path)
+
+    filenames = []
+    for ext in extensions:
+        # glob.glob('**/*.c') does not pick up the base directory
+        filenames += [os.path.join(path, x) for x in glob.glob(f'*.{ext}')]
+        # glob matches in subdirectories too
+        filenames += [os.path.join(path, x) for x in glob.glob(f'**/*.{ext}')]
+
+    # restore previous CWD
+    os.chdir(oldpwd)
+
+    return filenames
 
 def scan_testsuite_path(testsuite_path):
     subcases = []
@@ -265,7 +290,9 @@ def scan_testsuite_path(testsuite_path):
     ztest_suite_names = []
 
     src_dir_path = _find_src_dir_path(testsuite_path)
-    for filename in glob.glob(os.path.join(src_dir_path, "*.c*")):
+    for filename in find_c_files_in(src_dir_path):
+        if os.stat(filename).st_size == 0:
+            continue
         try:
             result: ScanPathResult = scan_file(filename)
             if result.warnings:
@@ -284,9 +311,15 @@ def scan_testsuite_path(testsuite_path):
                 ztest_suite_names += result.ztest_suite_names
 
         except ValueError as e:
-            logger.error("%s: can't find: %s" % (filename, e))
+            logger.error("%s: error parsing source file: %s" % (filename, e))
 
-    for filename in glob.glob(os.path.join(testsuite_path, "*.c*")):
+    src_dir_pathlib_path = Path(src_dir_path)
+    for filename in find_c_files_in(testsuite_path):
+        # If we have already scanned those files in the src_dir step, skip them.
+        filename_path = Path(filename)
+        if src_dir_pathlib_path in filename_path.parents:
+            continue
+
         try:
             result: ScanPathResult = scan_file(filename)
             if result.warnings:
@@ -327,11 +360,24 @@ class TestCase(DisablePyTestCollectionMixin):
     def __init__(self, name=None, testsuite=None):
         self.duration = 0
         self.name = name
-        self.status = None
+        self._status = TwisterStatus.NONE
         self.reason = None
         self.testsuite = testsuite
         self.output = ""
         self.freeform = False
+
+    @property
+    def status(self) -> TwisterStatus:
+        return self._status
+
+    @status.setter
+    def status(self, value : TwisterStatus) -> None:
+        # Check for illegal assignments by value
+        try:
+            key = value.name if isinstance(value, Enum) else value
+            self._status = TwisterStatus[key]
+        except KeyError:
+            raise StatusAttributeError(self.__class__, value)
 
     def __lt__(self, other):
         return self.name < other.name
@@ -346,7 +392,7 @@ class TestSuite(DisablePyTestCollectionMixin):
     """Class representing a test application
     """
 
-    def __init__(self, suite_root, suite_path, name, data=None):
+    def __init__(self, suite_root, suite_path, name, data=None, detailed_test_id=True):
         """TestSuite constructor.
 
         This gets called by TestPlan as it finds and reads test yaml files.
@@ -367,18 +413,37 @@ class TestSuite(DisablePyTestCollectionMixin):
         """
 
         workdir = os.path.relpath(suite_path, suite_root)
-        self.name = self.get_unique(suite_root, workdir, name)
+
+        assert self.check_suite_name(name, suite_root, workdir)
+        self.detailed_test_id = detailed_test_id
+        self.name = self.get_unique(suite_root, workdir, name) if self.detailed_test_id else name
         self.id = name
 
         self.source_dir = suite_path
+        self.source_dir_rel = os.path.relpath(os.path.realpath(suite_path), start=canonical_zephyr_base)
         self.yamlfile = suite_path
         self.testcases = []
+        self.integration_platforms = []
 
         self.ztest_suite_names = []
+
+        self._status = TwisterStatus.NONE
 
         if data:
             self.load(data)
 
+    @property
+    def status(self) -> TwisterStatus:
+        return self._status
+
+    @status.setter
+    def status(self, value : TwisterStatus) -> None:
+        # Check for illegal assignments by value
+        try:
+            key = value.name if isinstance(value, Enum) else value
+            self._status = TwisterStatus[key]
+        except KeyError:
+            raise StatusAttributeError(self.__class__, value)
 
     def load(self, data):
         for k, v in data.items():
@@ -388,21 +453,22 @@ class TestSuite(DisablePyTestCollectionMixin):
         if self.harness == 'console' and not self.harness_config:
             raise Exception('Harness config error: console harness defined without a configuration.')
 
-    def add_subcases(self, data, parsed_subcases, suite_names):
+    def add_subcases(self, data, parsed_subcases=None, suite_names=None):
         testcases = data.get("testcases", [])
         if testcases:
             for tc in testcases:
                 self.add_testcase(name=f"{self.id}.{tc}")
         else:
-            # only add each testcase once
-            for sub in set(parsed_subcases):
-                name = "{}.{}".format(self.id, sub)
-                self.add_testcase(name)
-
             if not parsed_subcases:
                 self.add_testcase(self.id, freeform=True)
+            else:
+                # only add each testcase once
+                for sub in set(parsed_subcases):
+                    name = "{}.{}".format(self.id, sub)
+                    self.add_testcase(name)
 
-        self.ztest_suite_names = suite_names
+        if suite_names:
+            self.ztest_suite_names = suite_names
 
     def add_testcase(self, name, freeform=False):
         tc = TestCase(name=name, testsuite=self)
@@ -422,11 +488,15 @@ class TestSuite(DisablePyTestCollectionMixin):
             relative_ts_root = ""
 
         # workdir can be "."
-        unique = os.path.normpath(os.path.join(relative_ts_root, workdir, name))
+        unique = os.path.normpath(os.path.join(relative_ts_root, workdir, name)).replace(os.sep, '/')
+        return unique
+
+    @staticmethod
+    def check_suite_name(name, testsuite_root, workdir):
         check = name.split(".")
         if len(check) < 2:
             raise TwisterException(f"""bad test name '{name}' in {testsuite_root}/{workdir}. \
 Tests should reference the category and subsystem with a dot as a separator.
                     """
                     )
-        return unique
+        return True

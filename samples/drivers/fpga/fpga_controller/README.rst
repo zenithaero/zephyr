@@ -1,12 +1,12 @@
-.. _samples_fpga_controller:
+.. zephyr:code-sample:: fpga-controller
+   :name: FPGA Controller
 
-Zephyr FPGA controller
-######################
+   Load a bitstream into an FPGA and perform basic operations on it.
 
 Overview
 ********
 This module is an FPGA driver that can easily load a bitstream, reset it, check its status, enable or disable the FPGA.
-This sample demonstrates how to use the FPGA driver API and the the FPGA controller shell subsystem.
+This sample demonstrates how to use the FPGA driver API and the FPGA controller shell subsystem.
 Currently the sample works with `Quicklogic Quickfeather board`_.
 
 Requirements
@@ -82,8 +82,8 @@ To upload the bitstream again you need to reset the FPGA:
     FPGA: resetting FPGA
 
 You can also use your own bitstream.
-To load a bitstream into device memory, use `devmem load` command.
-It is important to use the -e option when sending a bistream via `xxd`:
+To load a bitstream into device memory, use ``devmem load`` command.
+It is important to use the -e option when sending a bitstream via ``xxd``:
 
 .. code-block:: console
 
@@ -92,14 +92,14 @@ It is important to use the -e option when sending a bistream via `xxd`:
     Press ctrl-x + ctrl-q to stop
 
 Now, the loader is waiting for data.
-You can either type it directly from the console or send it from the host PC (replace `ttyX` with the appropriate one for your shell console):
+You can either type it directly from the console or send it from the host PC (replace ``ttyX`` with the appropriate one for your shell console):
 
 .. code-block:: console
 
     xxd -p data > /dev/ttyX
 
 (It is important to use plain-style hex dump)
-Once the data is transferred, use `ctrl-x + ctrl-q` to quit loader.
+Once the data is transferred, use :kbd:`Ctrl-X Ctrl-Q` to quit loader.
 It will print the sum of the read bytes and return to the shell:
 
 .. code-block:: console

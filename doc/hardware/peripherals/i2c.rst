@@ -12,7 +12,7 @@ Overview
    `NXP I2C Bus Specification Rev 7.0 <i2c-specification_>`_. These changed
    from previous revisions as of its release October 1, 2021.
 
-`I2C <i2c-specification>`_ (Inter-Integrated Circuit, pronounced "eye
+`I2C`_ (Inter-Integrated Circuit, pronounced "eye
 squared see") is a commonly-used two-signal shared peripheral interface
 bus.  Many system-on-chip solutions provide controllers that communicate
 on an I2C bus.  Devices on the bus can operate in two roles: as a
@@ -27,7 +27,7 @@ I2C Controller API
 ==================
 
 Zephyr's I2C controller API is used when an I2C peripheral controls the bus,
-in particularly the start and stop conditions and the clock.  This is
+particularly the start and stop conditions and the clock.  This is
 the most common mode, used to interact with I2C devices like sensors and
 serial memory.
 
@@ -63,3 +63,5 @@ API Reference
 
 .. _i2c-specification:
    https://www.nxp.com/docs/en/user-guide/UM10204.pdf
+
+.. _I2C: i2c-specification_

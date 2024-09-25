@@ -28,6 +28,9 @@
 
 #include "fs_impl.h"
 
+/* Used on devices that have no explicit erase */
+#define LITTLEFS_DEFAULT_BLOCK_SIZE     4096
+
 /* note: one of the next options have to be enabled, at least */
 BUILD_ASSERT(IS_ENABLED(CONFIG_FS_LITTLEFS_BLK_DEV) ||
 	     IS_ENABLED(CONFIG_FS_LITTLEFS_FMP_DEV));
@@ -195,7 +198,7 @@ static int lfs_api_erase(const struct lfs_config *c, lfs_block_t block)
 	const struct flash_area *fa = c->context;
 	size_t offset = block * c->block_size;
 
-	int rc = flash_area_erase(fa, offset, c->block_size);
+	int rc = flash_area_flatten(fa, offset, c->block_size);
 
 	return errno_to_lfs(rc);
 }
@@ -264,7 +267,7 @@ static void release_file_data(struct fs_file_t *fp)
 		fc_release(fdp->cache_block);
 	}
 
-	k_mem_slab_free(&file_data_pool, &fp->filep);
+	k_mem_slab_free(&file_data_pool, fp->filep);
 	fp->filep = NULL;
 }
 
@@ -480,7 +483,7 @@ static int littlefs_opendir(struct fs_dir_t *dp, const char *path)
 	fs_unlock(fs);
 
 	if (ret < 0) {
-		k_mem_slab_free(&lfs_dir_pool, &dp->dirp);
+		k_mem_slab_free(&lfs_dir_pool, dp->dirp);
 	}
 
 	return lfs_to_errno(ret);
@@ -526,7 +529,7 @@ static int littlefs_closedir(struct fs_dir_t *dp)
 
 	fs_unlock(fs);
 
-	k_mem_slab_free(&lfs_dir_pool, &dp->dirp);
+	k_mem_slab_free(&lfs_dir_pool, dp->dirp);
 
 	return lfs_to_errno(ret);
 }
@@ -581,6 +584,7 @@ static int littlefs_statvfs(struct fs_mount_t *mountp,
 
 #ifdef CONFIG_FS_LITTLEFS_FMP_DEV
 
+#if defined(CONFIG_FLASH_HAS_EXPLICIT_ERASE)
 /* Return maximum page size in a flash area.  There's no flash_area
  * API to implement this, so we have to make one here.
  */
@@ -612,6 +616,7 @@ static bool get_page_cb(const struct flash_pages_info *info, void *ctxp)
 
 	return true;
 }
+#endif
 
 /* Iterate over all page groups in the flash area and return the
  * largest page size we see.  This works as long as the partition is
@@ -620,20 +625,31 @@ static bool get_page_cb(const struct flash_pages_info *info, void *ctxp)
  */
 static lfs_size_t get_block_size(const struct flash_area *fa)
 {
+#if defined(CONFIG_FLASH_HAS_EXPLICIT_ERASE)
 	struct get_page_ctx ctx = {
 		.area = fa,
 		.max_size = 0,
 	};
 	const struct device *dev = flash_area_get_device(fa);
+#if defined(CONFIG_FLASH_HAS_NO_EXPLICIT_ERASE)
+	const struct flash_parameters *fparams = flash_get_parameters(dev);
+
+	if (!(flash_params_get_erase_cap(fparams) & FLASH_ERASE_C_EXPLICIT)) {
+		return LITTLEFS_DEFAULT_BLOCK_SIZE;
+	}
+#endif
 
 	flash_page_foreach(dev, get_page_cb, &ctx);
 
 	return ctx.max_size;
+#else
+	return LITTLEFS_DEFAULT_BLOCK_SIZE;
+#endif
 }
 
-static int littlefs_flash_init(struct fs_littlefs *fs, uintptr_t dev_id)
+static int littlefs_flash_init(struct fs_littlefs *fs, void *dev_id)
 {
-	unsigned int area_id = (uintptr_t)dev_id;
+	unsigned int area_id = POINTER_TO_UINT(dev_id);
 	const struct flash_area **fap = (const struct flash_area **)&fs->backend;
 	const struct device *dev;
 	int ret;
@@ -660,7 +676,7 @@ static int littlefs_flash_init(struct fs_littlefs *fs, uintptr_t dev_id)
 }
 #endif /* CONFIG_FS_LITTLEFS_FMP_DEV */
 
-static int littlefs_init_backend(struct fs_littlefs *fs, uintptr_t dev_id, int flags)
+static int littlefs_init_backend(struct fs_littlefs *fs, void *dev_id, int flags)
 {
 	int ret = 0;
 
@@ -672,7 +688,7 @@ static int littlefs_init_backend(struct fs_littlefs *fs, uintptr_t dev_id, int f
 
 #ifdef CONFIG_FS_LITTLEFS_BLK_DEV
 	if (littlefs_on_blkdev(flags)) {
-		fs->backend = (void *) dev_id;
+		fs->backend = dev_id;
 		ret = disk_access_init((char *) fs->backend);
 		if (ret < 0) {
 			LOG_ERR("Storage init ERROR!");
@@ -856,7 +872,7 @@ static int littlefs_init_cfg(struct fs_littlefs *fs, int flags)
 	return 0;
 }
 
-static int littlefs_init_fs(struct fs_littlefs *fs, int dev_id, int flags)
+static int littlefs_init_fs(struct fs_littlefs *fs, void *dev_id, int flags)
 {
 	int ret = 0;
 
@@ -889,7 +905,7 @@ static int littlefs_mount(struct fs_mount_t *mountp)
 	k_mutex_init(&fs->mutex);
 	fs_lock(fs);
 
-	ret = littlefs_init_fs(fs, (uintptr_t)mountp->storage_dev, mountp->flags);
+	ret = littlefs_init_fs(fs, mountp->storage_dev, mountp->flags);
 	if (ret < 0) {
 		goto out;
 	}
@@ -954,7 +970,7 @@ static int littlefs_mkfs(uintptr_t dev_id, void *cfg, int flags)
 	k_mutex_init(&fs->mutex);
 	fs_lock(fs);
 
-	ret = littlefs_init_fs(fs, dev_id, flags);
+	ret = littlefs_init_fs(fs, UINT_TO_POINTER(dev_id), flags);
 	if (ret < 0) {
 		goto out;
 	}
@@ -1098,4 +1114,4 @@ static int littlefs_init(void)
 	return rc;
 }
 
-SYS_INIT(littlefs_init, POST_KERNEL, 99);
+SYS_INIT(littlefs_init, POST_KERNEL, CONFIG_FILE_SYSTEM_INIT_PRIORITY);

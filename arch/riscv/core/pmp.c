@@ -29,7 +29,7 @@
 #include <kernel_internal.h>
 #include <zephyr/linker/linker-defs.h>
 #include <pmp.h>
-#include <zephyr/sys/arch_interface.h>
+#include <zephyr/arch/arch_interface.h>
 #include <zephyr/arch/riscv/csr.h>
 
 #define LOG_LEVEL CONFIG_MPU_LOG_LEVEL
@@ -56,7 +56,7 @@ LOG_MODULE_REGISTER(mpu);
 
 #define PMP_NONE 0
 
-static void print_pmp_entries(unsigned int start, unsigned int end,
+static void print_pmp_entries(unsigned int pmp_start, unsigned int pmp_end,
 			      unsigned long *pmp_addr, unsigned long *pmp_cfg,
 			      const char *banner)
 {
@@ -64,7 +64,7 @@ static void print_pmp_entries(unsigned int start, unsigned int end,
 	unsigned int index;
 
 	LOG_DBG("PMP %s:", banner);
-	for (index = start; index < end; index++) {
+	for (index = pmp_start; index < pmp_end; index++) {
 		unsigned long start, end, tmp;
 
 		switch (pmp_n_cfg[index] & PMP_A) {
@@ -161,8 +161,8 @@ static bool set_pmp_entry(unsigned int *index_p, uint8_t perm,
 	unsigned int index = *index_p;
 	bool ok = true;
 
-	__ASSERT((start & 0x3) == 0, "misaligned start address");
-	__ASSERT((size & 0x3) == 0, "misaligned size");
+	__ASSERT((start & (CONFIG_PMP_GRANULARITY - 1)) == 0, "misaligned start address");
+	__ASSERT((size & (CONFIG_PMP_GRANULARITY - 1)) == 0, "misaligned size");
 
 	if (index >= index_limit) {
 		LOG_ERR("out of PMP slots");
@@ -201,6 +201,34 @@ static bool set_pmp_entry(unsigned int *index_p, uint8_t perm,
 	}
 
 	*index_p = index;
+	return ok;
+}
+
+static inline bool set_pmp_mprv_catchall(unsigned int *index_p,
+					 unsigned long *pmp_addr, unsigned long *pmp_cfg,
+					 unsigned int index_limit)
+{
+	/*
+	 * We'll be using MPRV. Make a fallback entry with everything
+	 * accessible as if no PMP entries were matched which is otherwise
+	 * the default behavior for m-mode without MPRV.
+	 */
+	bool ok = set_pmp_entry(index_p, PMP_R | PMP_W | PMP_X,
+				0, 0, pmp_addr, pmp_cfg, index_limit);
+
+#ifdef CONFIG_QEMU_TARGET
+	if (ok) {
+		/*
+		 * Workaround: The above produced 0x1fffffff which is correct.
+		 * But there is a QEMU bug that prevents it from interpreting
+		 * this value correctly. Hardcode the special case used by
+		 * QEMU to bypass this bug for now. The QEMU fix is here:
+		 * https://lists.gnu.org/archive/html/qemu-devel/2022-04/msg00961.html
+		 */
+		pmp_addr[*index_p - 1] = -1L;
+	}
+#endif
+
 	return ok;
 }
 
@@ -320,8 +348,8 @@ static unsigned int global_pmp_end_index;
  */
 void z_riscv_pmp_init(void)
 {
-	unsigned long pmp_addr[4];
-	unsigned long pmp_cfg[1];
+	unsigned long pmp_addr[5];
+	unsigned long pmp_cfg[2];
 	unsigned int index = 0;
 
 	/* The read-only area is always there for every mode */
@@ -329,6 +357,17 @@ void z_riscv_pmp_init(void)
 		      (uintptr_t)__rom_region_start,
 		      (size_t)__rom_region_size,
 		      pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+
+#ifdef CONFIG_NULL_POINTER_EXCEPTION_DETECTION_PMP
+	/*
+	 * Use a PMP slot to make region (starting at address 0x0) inaccessible
+	 * for detecting null pointer dereferencing.
+	 */
+	set_pmp_entry(&index, PMP_NONE | PMP_L,
+		      0,
+		      CONFIG_NULL_POINTER_EXCEPTION_REGION_SIZE,
+		      pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+#endif
 
 #ifdef CONFIG_PMP_STACK_GUARD
 	/*
@@ -340,9 +379,27 @@ void z_riscv_pmp_init(void)
 		      (uintptr_t)z_interrupt_stacks[_current_cpu->id],
 		      Z_RISCV_STACK_GUARD_SIZE,
 		      pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
-#endif
 
+	/*
+	 * This early, the kernel init code uses the IRQ stack and we want to
+	 * safeguard it as soon as possible. But we need a temporary default
+	 * "catch all" PMP entry for MPRV to work. Later on, this entry will
+	 * be set for each thread by z_riscv_pmp_stackguard_prepare().
+	 */
+	set_pmp_mprv_catchall(&index, pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+
+	 /* Write those entries to PMP regs. */
 	write_pmp_entries(0, index, true, pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+
+	/* Activate our non-locked PMP entries for m-mode */
+	csr_set(mstatus, MSTATUS_MPRV);
+
+	/* And forget about that last entry as we won't need it later */
+	index--;
+#else
+	 /* Write those entries to PMP regs. */
+	write_pmp_entries(0, index, true, pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+#endif
 
 #ifdef CONFIG_SMP
 #ifdef CONFIG_PMP_STACK_GUARD
@@ -362,6 +419,7 @@ void z_riscv_pmp_init(void)
 	}
 #endif
 
+	__ASSERT(index <= PMPCFG_STRIDE, "provision for one global word only");
 	global_pmp_cfg[0] = pmp_cfg[0];
 	global_pmp_last_addr = pmp_addr[index - 1];
 	global_pmp_end_index = index;
@@ -418,24 +476,7 @@ void z_riscv_pmp_stackguard_prepare(struct k_thread *thread)
 	set_pmp_entry(&index, PMP_NONE,
 		      stack_bottom, Z_RISCV_STACK_GUARD_SIZE,
 		      PMP_M_MODE(thread));
-
-	/*
-	 * We'll be using MPRV. Make a fallback entry with everything
-	 * accessible as if no PMP entries were matched which is otherwise
-	 * the default behavior for m-mode without MPRV.
-	 */
-	set_pmp_entry(&index, PMP_R | PMP_W | PMP_X,
-		      0, 0, PMP_M_MODE(thread));
-#ifdef CONFIG_QEMU_TARGET
-	/*
-	 * Workaround: The above produced 0x1fffffff which is correct.
-	 * But there is a QEMU bug that prevents it from interpreting this
-	 * value correctly. Hardcode the special case used by QEMU to
-	 * bypass this bug for now. The QEMU fix is here:
-	 * https://lists.gnu.org/archive/html/qemu-devel/2022-04/msg00961.html
-	 */
-	thread->arch.m_mode_pmpaddr_regs[index-1] = -1L;
-#endif
+	set_pmp_mprv_catchall(&index, PMP_M_MODE(thread));
 
 	/* remember how many entries we use */
 	thread->arch.m_mode_pmp_end_index = index;
@@ -468,6 +509,37 @@ void z_riscv_pmp_stackguard_enable(struct k_thread *thread)
 
 	/* Activate our non-locked PMP entries in m-mode */
 	csr_set(mstatus, MSTATUS_MPRV);
+}
+
+/**
+ * @brief Remove PMP stackguard content to actual PMP registers
+ */
+void z_riscv_pmp_stackguard_disable(void)
+{
+
+	unsigned long pmp_addr[PMP_M_MODE_SLOTS];
+	unsigned long pmp_cfg[PMP_M_MODE_SLOTS / sizeof(unsigned long)];
+	unsigned int index = global_pmp_end_index;
+
+	/* Retrieve the pmpaddr value matching the last global PMP slot. */
+	pmp_addr[global_pmp_end_index - 1] = global_pmp_last_addr;
+
+	/* Disable (non-locked) PMP entries for m-mode while we update them. */
+	csr_clear(mstatus, MSTATUS_MPRV);
+
+	/*
+	 * Set a temporary default "catch all" PMP entry for MPRV to work,
+	 * except for the global locked entries.
+	 */
+	set_pmp_mprv_catchall(&index, pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+
+	/* Write "catch all" entry and clear unlocked entries to PMP regs. */
+	write_pmp_entries(global_pmp_end_index, index,
+			  true, pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+
+	if (PMP_DEBUG_DUMP) {
+		dump_pmp_regs("catch all register dump");
+	}
 }
 
 #endif /* CONFIG_PMP_STACK_GUARD */
@@ -656,7 +728,7 @@ int arch_mem_domain_thread_remove(struct k_thread *thread)
 	((inner_start) >= (outer_start) && (inner_size) <= (outer_size) && \
 	 ((inner_start) - (outer_start)) <= ((outer_size) - (inner_size)))
 
-int arch_buffer_validate(void *addr, size_t size, int write)
+int arch_buffer_validate(const void *addr, size_t size, int write)
 {
 	uintptr_t start = (uintptr_t)addr;
 	int ret = -1;

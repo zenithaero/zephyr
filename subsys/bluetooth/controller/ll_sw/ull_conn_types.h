@@ -163,15 +163,15 @@ struct ll_conn {
 
 	struct {
 		uint8_t reason_final;
-		/* node rx type with memory aligned storage for terminate
+		/* node rx type with dummy uint8_t to ensure room for terminate
 		 * reason.
 		 * HCI will reference the value using the pdu member of
 		 * struct node_rx_pdu.
+		 *
 		 */
 		struct {
-			struct node_rx_hdr hdr;
-
-			uint8_t reason __aligned(4);
+			struct node_rx_pdu rx;
+			uint8_t dummy_reason;
 		} node_rx;
 	} llcp_terminate;
 
@@ -202,7 +202,6 @@ struct ll_conn {
 #if defined(CONFIG_BT_CTLR_CONN_META)
 			uint8_t  is_must_expire:1;
 #endif /* CONFIG_BT_CTLR_CONN_META */
-			uint8_t terminate_ack:1;
 		} central;
 #endif /* CONFIG_BT_CENTRAL */
 	};

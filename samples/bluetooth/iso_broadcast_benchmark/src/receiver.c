@@ -171,7 +171,7 @@ static void print_stats(char *name, struct iso_recv_stats *stats)
 
 	LOG_INF("%s: Received %u/%u (%.2f%%) - Total packets lost %u",
 		name, stats->iso_recv_count, total_packets,
-		(float)stats->iso_recv_count * 100 / total_packets,
+		(double)((float)stats->iso_recv_count * 100 / total_packets),
 		stats->iso_lost_count);
 
 }
@@ -372,9 +372,9 @@ static int create_big_sync(struct bt_iso_big **big, struct bt_le_per_adv_sync *s
 					    BT_ISO_SYNC_TIMEOUT_MIN,
 					    BT_ISO_SYNC_TIMEOUT_MAX);
 	big_sync_param.num_bis = bis_count;
-	/* BIS indexes start from 0x01, so add one to `i` */
+	/* BIS indexes start from 0x01 */
 	for (int i = 1; i <= big_sync_param.num_bis; i++) {
-		big_sync_param.bis_bitfield |= BIT(i);
+		big_sync_param.bis_bitfield |= BT_ISO_BIS_INDEX_BIT(i);
 	}
 
 	LOG_INF("Syncing to BIG");

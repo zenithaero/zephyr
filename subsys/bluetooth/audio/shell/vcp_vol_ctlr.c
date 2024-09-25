@@ -7,15 +7,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/types.h>
-#include <zephyr/bluetooth/conn.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <zephyr/autoconf.h>
+#include <zephyr/bluetooth/audio/aics.h>
 #include <zephyr/bluetooth/audio/vcp.h>
+#include <zephyr/bluetooth/audio/vocs.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/shell/shell.h>
-#include <stdlib.h>
+#include <zephyr/shell/shell_string_conv.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/types.h>
 
-#include "shell/bt.h"
+#include "host/shell/bt.h"
 
-static struct bt_vcp_vol_ctlr *vol_ctlr;
+static struct bt_vcp_vol_ctlr *vcp_vol_ctlr;
 static struct bt_vcp_included vcp_included;
 
 static void vcs_discover_cb(struct bt_vcp_vol_ctlr *vol_ctlr, int err,
@@ -24,7 +33,7 @@ static void vcs_discover_cb(struct bt_vcp_vol_ctlr *vol_ctlr, int err,
 	if (err != 0) {
 		shell_error(ctx_shell, "VCP discover failed (%d)", err);
 	} else {
-		shell_print(ctx_shell, "VCP discover done with %u AICS",
+		shell_print(ctx_shell, "VCP discover done with %u VOCS and %u AICS", vocs_count,
 			    aics_count);
 
 		if (bt_vcp_vol_ctlr_included_get(vol_ctlr, &vcp_included)) {
@@ -154,7 +163,7 @@ static void vcs_aics_set_manual_mode_cb(struct bt_aics *inst, int err)
 			    "Set manual mode failed (%d) for inst %p",
 			    err, inst);
 	} else {
-		shell_print(ctx_shell, "Manuel mode set for inst %p", inst);
+		shell_print(ctx_shell, "Manual mode set for inst %p", inst);
 	}
 }
 
@@ -326,16 +335,21 @@ static struct bt_vcp_vol_ctlr_cb vcp_cbs = {
 static int cmd_vcp_vol_ctlr_discover(const struct shell *sh, size_t argc,
 				   char **argv)
 {
+	static bool cb_registered;
 	int result;
 
 	if (!ctx_shell) {
 		ctx_shell = sh;
 	}
 
-	result = bt_vcp_vol_ctlr_cb_register(&vcp_cbs);
-	if (result != 0) {
-		shell_print(sh, "CB register failed: %d", result);
-		return result;
+	if (!cb_registered) {
+		result = bt_vcp_vol_ctlr_cb_register(&vcp_cbs);
+		if (result != 0) {
+			shell_print(sh, "CB register failed: %d", result);
+			return result;
+		}
+
+		cb_registered = true;
 	}
 
 	if (default_conn == NULL) {
@@ -343,7 +357,7 @@ static int cmd_vcp_vol_ctlr_discover(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_discover(default_conn, &vol_ctlr);
+	result = bt_vcp_vol_ctlr_discover(default_conn, &vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -361,7 +375,7 @@ static int cmd_vcp_vol_ctlr_state_get(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_read_state(vol_ctlr);
+	result = bt_vcp_vol_ctlr_read_state(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -379,7 +393,7 @@ static int cmd_vcp_vol_ctlr_flags_get(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_read_flags(vol_ctlr);
+	result = bt_vcp_vol_ctlr_read_flags(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -397,7 +411,7 @@ static int cmd_vcp_vol_ctlr_volume_down(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_vol_down(vol_ctlr);
+	result = bt_vcp_vol_ctlr_vol_down(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -416,7 +430,7 @@ static int cmd_vcp_vol_ctlr_volume_up(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_vol_up(vol_ctlr);
+	result = bt_vcp_vol_ctlr_vol_up(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -434,7 +448,7 @@ static int cmd_vcp_vol_ctlr_unmute_volume_down(const struct shell *sh,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_unmute_vol_down(vol_ctlr);
+	result = bt_vcp_vol_ctlr_unmute_vol_down(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -452,7 +466,7 @@ static int cmd_vcp_vol_ctlr_unmute_volume_up(const struct shell *sh,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_unmute_vol_up(vol_ctlr);
+	result = bt_vcp_vol_ctlr_unmute_vol_up(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -485,7 +499,7 @@ static int cmd_vcp_vol_ctlr_volume_set(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_set_vol(vol_ctlr, volume);
+	result = bt_vcp_vol_ctlr_set_vol(vcp_vol_ctlr, volume);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -504,7 +518,7 @@ static int cmd_vcp_vol_ctlr_unmute(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_unmute(vol_ctlr);
+	result = bt_vcp_vol_ctlr_unmute(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -522,7 +536,7 @@ static int cmd_vcp_vol_ctlr_mute(const struct shell *sh, size_t argc,
 		return -ENOEXEC;
 	}
 
-	result = bt_vcp_vol_ctlr_mute(vol_ctlr);
+	result = bt_vcp_vol_ctlr_mute(vcp_vol_ctlr);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}

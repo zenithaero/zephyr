@@ -21,7 +21,7 @@ extern "C" {
  * that need to call into the kernel as system calls
  */
 
-#if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_ARCMWDT_LIBC) || defined(CONFIG_PICOLIBC)
+#if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_ARCMWDT_LIBC)
 
 /* syscall generation ignores preprocessor, ensure this is defined to ensure
  * we don't have compile errors
@@ -31,26 +31,20 @@ __syscall int zephyr_read_stdin(char *buf, int nbytes);
 __syscall int zephyr_write_stdout(const void *buf, int nbytes);
 
 #else
-/* Minimal libc */
+/* Minimal libc and picolibc */
 
 __syscall int zephyr_fputc(int c, FILE * stream);
 
+#ifdef CONFIG_MINIMAL_LIBC
+/* Minimal libc only */
+
 __syscall size_t zephyr_fwrite(const void *ZRESTRICT ptr, size_t size,
 				size_t nitems, FILE *ZRESTRICT stream);
+#endif
+
 #endif /* CONFIG_NEWLIB_LIBC */
 
-/* Handle deprecated malloc arena size configuration values */
-#ifdef CONFIG_COMMON_LIBC_MALLOC
-# if defined(CONFIG_MINIMAL_LIBC) && (CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE != -2)
-#  undef CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE
-#  define CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE
-#  warning Using deprecated setting CONFIG_MINIMAL_LIBC_MALLOC_ARENA_SIZE
-# elif defined(CONFIG_PICOLIBC) && (CONFIG_PICOLIBC_HEAP_SIZE != -2)
-#  undef CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE
-#  define CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE CONFIG_PICOLIBC_HEAP_SIZE
-#  warning Using deprecated setting CONFIG_PICOLIBC_HEAP_SIZE
-# endif
-#endif
+void __stdout_hook_install(int (*hook)(int));
 
 #ifdef CONFIG_USERSPACE
 #ifdef CONFIG_COMMON_LIBC_MALLOC
@@ -64,12 +58,12 @@ __syscall size_t zephyr_fwrite(const void *ZRESTRICT ptr, size_t size,
 #define Z_MALLOC_PARTITION_EXISTS 1
 #endif
 
-#elif defined(CONFIG_NEWLIB_LIBC)
+#elif defined(CONFIG_NEWLIB_LIBC) && !defined(CONFIG_NEWLIB_LIBC_CUSTOM_SBRK)
 /* If we are using newlib, the heap arena is in one of two areas:
  *  - If we have an MPU that requires power of two alignment, the heap bounds
  *    must be specified in Kconfig via CONFIG_NEWLIB_LIBC_ALIGNED_HEAP_SIZE.
  *  - Otherwise, the heap arena on most arches starts at a suitably
- *    aligned base addreess after the `_end` linker symbol, through to the end
+ *    aligned base address after the `_end` linker symbol, through to the end
  *    of system RAM.
  */
 #if (!defined(CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT) || \
@@ -87,8 +81,7 @@ __syscall size_t zephyr_fwrite(const void *ZRESTRICT ptr, size_t size,
 extern struct k_mem_partition z_malloc_partition;
 #endif
 
-#if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_STACK_CANARIES) || \
-defined(CONFIG_PICOLIBC) || defined(CONFIG_NEED_LIBC_MEM_PARTITION)
+#ifdef CONFIG_NEED_LIBC_MEM_PARTITION
 /* - All newlib globals will be placed into z_libc_partition.
  * - Minimal C library globals, if any, will be placed into
  *   z_libc_partition.
@@ -105,7 +98,7 @@ extern struct k_mem_partition z_libc_partition;
 #endif
 #endif /* CONFIG_USERSPACE */
 
-#include <syscalls/libc-hooks.h>
+#include <zephyr/syscalls/libc-hooks.h>
 
 /* C library memory partitions */
 #define Z_LIBC_DATA K_APP_DMEM(z_libc_partition)

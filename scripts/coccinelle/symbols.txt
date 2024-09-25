@@ -31,6 +31,7 @@ difftime64
 div
 erf
 erfc
+errno
 exit
 exp
 fabs
@@ -207,7 +208,6 @@ strtod64
 strtod128
 strtof
 strtok
-strtok_r
 strtol
 strtold
 strtoul

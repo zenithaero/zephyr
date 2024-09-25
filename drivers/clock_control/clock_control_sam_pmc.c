@@ -13,6 +13,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/clock_control/atmel_sam_pmc.h>
+#include <soc.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(clock_control, CONFIG_CLOCK_CONTROL_LOG_LEVEL);
@@ -128,7 +129,7 @@ atmel_sam_clock_control_get_status(const struct device *dev,
 	return status;
 }
 
-static struct clock_control_driver_api atmel_sam_clock_control_api = {
+static const struct clock_control_driver_api atmel_sam_clock_control_api = {
 	.on = atmel_sam_clock_control_on,
 	.off = atmel_sam_clock_control_off,
 	.get_rate = atmel_sam_clock_control_get_rate,

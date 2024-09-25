@@ -8,8 +8,8 @@ Overview
 
 Auxiliary Displays are text-based displays that have simple interfaces for
 displaying textual, numeric or alphanumeric data, as opposed to the
-`Display API <display_api>`_, auxiliary displays do not support custom
-graphical output to displays (and and most often monochrome), the most
+:ref:`display_api`, auxiliary displays do not support custom
+graphical output to displays (and most often monochrome), the most
 advanced custom feature supported is generation of custom characters.
 These inexpensive displays are commonly found with various configurations
 and sizes, a common display size is 16 characters by 2 lines.

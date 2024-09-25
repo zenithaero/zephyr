@@ -1,10 +1,10 @@
 /*
- * Copyright 2017-2020,2023 NXP
+ * Copyright 2017-2020,2022-2023 NXP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT nxp_lpc_gpio
+#define DT_DRV_COMPAT nxp_lpc_gpio_port
 
 /** @file
  * @brief GPIO driver for LPC54XXX family
@@ -21,9 +21,14 @@
 #include <soc.h>
 #include <fsl_common.h>
 #include <zephyr/drivers/gpio/gpio_utils.h>
+#ifdef CONFIG_NXP_PINT
 #include <zephyr/drivers/interrupt_controller/nxp_pint.h>
+#endif
 #include <fsl_gpio.h>
 #include <fsl_device_registers.h>
+#ifdef MCI_IO_MUX
+#include <zephyr/drivers/pinctrl.h>
+#endif
 
 /* Interrupt sources, matching int-source enum in DTS binding definition */
 #define INT_SOURCE_PINT 0
@@ -38,11 +43,14 @@ struct gpio_mcux_lpc_config {
 	uint8_t int_source;
 #ifdef IOPCTL
 	IOPCTL_Type *pinmux_base;
-#else
+#endif
+#ifdef IOCON
 	IOCON_Type *pinmux_base;
 #endif
+#ifdef MCI_IO_MUX
+	MCI_IO_MUX_Type * pinmux_base;
+#endif
 	uint32_t port_no;
-	clock_ip_name_t clock_ip_name;
 };
 
 struct gpio_mcux_lpc_data {
@@ -80,8 +88,8 @@ static int gpio_mcux_lpc_configure(const struct device *dev, gpio_pin_t pin,
 	}
 	/* Select GPIO mux for this pin (func 0 is always GPIO) */
 	*pinconfig &= ~(IOPCTL_PIO_FSEL_MASK);
-
-#else /* LPC SOCs */
+#endif
+#ifdef IOCON /* LPC SOCs */
 	volatile uint32_t *pinconfig;
 	IOCON_Type *pinmux_base;
 
@@ -100,6 +108,23 @@ static int gpio_mcux_lpc_configure(const struct device *dev, gpio_pin_t pin,
 	/* Select GPIO mux for this pin (func 0 is always GPIO) */
 	*pinconfig &= ~(IOCON_PIO_FUNC_MASK);
 #endif
+#ifdef MCI_IO_MUX /* RW61x SOCs */
+		/* Construct a pin control state, and apply it directly. */
+		pinctrl_soc_pin_t pin_cfg;
+
+		if (config->port_no == 1) {
+			pin_cfg = IOMUX_GPIO_IDX(pin + 32) | IOMUX_TYPE(IOMUX_GPIO);
+		} else {
+			pin_cfg = IOMUX_GPIO_IDX(pin) | IOMUX_TYPE(IOMUX_GPIO);
+		}
+		/* Add pull up flags, if required */
+		if ((flags & GPIO_PULL_UP) != 0) {
+			pin_cfg |= IOMUX_PAD_PULL(0x1);
+		} else if ((flags & GPIO_PULL_DOWN) != 0) {
+			pin_cfg |= IOMUX_PAD_PULL(0x2);
+		}
+		pinctrl_configure_pins(&pin_cfg, 1, 0);
+#endif
 
 	if (flags & (GPIO_PULL_UP | GPIO_PULL_DOWN)) {
 #ifdef IOPCTL /* RT600 and RT500 series */
@@ -109,7 +134,8 @@ static int gpio_mcux_lpc_configure(const struct device *dev, gpio_pin_t pin,
 		} else if ((flags & GPIO_PULL_DOWN) != 0) {
 			*pinconfig &= ~(IOPCTL_PIO_PULLUP_EN);
 		}
-#else /* LPC SOCs */
+#endif
+#ifdef IOCON /* LPC SOCs */
 
 		*pinconfig &= ~(IOCON_PIO_MODE_PULLUP|IOCON_PIO_MODE_PULLDOWN);
 		if ((flags & GPIO_PULL_UP) != 0) {
@@ -117,6 +143,16 @@ static int gpio_mcux_lpc_configure(const struct device *dev, gpio_pin_t pin,
 		} else if ((flags & GPIO_PULL_DOWN) != 0) {
 			*pinconfig |= IOCON_PIO_MODE_PULLDOWN;
 		}
+#endif
+	} else {
+#ifdef IOPCTL /* RT600 and RT500 series */
+		*pinconfig &= ~IOPCTL_PIO_PUPD_EN;
+#endif
+#ifdef IOCON /* LPC SOCs */
+		*pinconfig &= ~(IOCON_PIO_MODE_PULLUP|IOCON_PIO_MODE_PULLDOWN);
+#endif
+#ifdef MCI_IO_MUX
+
 #endif
 	}
 
@@ -197,6 +233,7 @@ static int gpio_mcux_lpc_port_toggle_bits(const struct device *dev,
 }
 
 
+#ifdef CONFIG_NXP_PINT
 /* Called by PINT when pin interrupt fires */
 static void gpio_mcux_lpc_pint_cb(uint8_t pin, void *user)
 {
@@ -252,7 +289,7 @@ static int gpio_mcux_lpc_pint_interrupt_cfg(const struct device *dev,
 	}
 
 	/* PINT treats GPIO pins as continuous. Each port has 32 pins */
-	ret = nxp_pint_pin_enable((port * 32) + pin, interrupt_mode);
+	ret = nxp_pint_pin_enable((port * 32) + pin, interrupt_mode, (trig & GPIO_INT_WAKEUP));
 	if (ret < 0) {
 		return ret;
 	}
@@ -261,6 +298,7 @@ static int gpio_mcux_lpc_pint_interrupt_cfg(const struct device *dev,
 					  gpio_mcux_lpc_pint_cb,
 					  (struct device *)dev);
 }
+#endif /* CONFIG_NXP_PINT */
 
 
 #if (defined(FSL_FEATURE_GPIO_HAS_INTERRUPT) && FSL_FEATURE_GPIO_HAS_INTERRUPT)
@@ -348,9 +386,11 @@ static int gpio_mcux_lpc_pin_interrupt_configure(const struct device *dev,
 		((gpio_base->DIR[port] & BIT(pin)) != 0)) {
 		return -ENOTSUP;
 	}
+#if defined(CONFIG_NXP_PINT)
 	if (config->int_source == INT_SOURCE_PINT) {
 		return gpio_mcux_lpc_pint_interrupt_cfg(dev, pin, mode, trig);
 	}
+#endif /* CONFIG_NXP_PINT */
 #if (defined(FSL_FEATURE_GPIO_HAS_INTERRUPT) && FSL_FEATURE_GPIO_HAS_INTERRUPT)
 	return gpio_mcux_lpc_module_interrupt_cfg(dev, pin, mode, trig);
 #else
@@ -369,7 +409,6 @@ static int gpio_mcux_lpc_manage_cb(const struct device *port,
 static int gpio_mcux_lpc_init(const struct device *dev)
 {
 	const struct gpio_mcux_lpc_config *config = dev->config;
-
 	GPIO_PortInit(config->gpio_base, config->port_no);
 
 	return 0;
@@ -386,12 +425,16 @@ static const struct gpio_driver_api gpio_mcux_lpc_driver_api = {
 	.manage_callback = gpio_mcux_lpc_manage_cb,
 };
 
-static const clock_ip_name_t gpio_clock_names[] = GPIO_CLOCKS;
+
 
 #ifdef IOPCTL
 #define PINMUX_BASE	IOPCTL
-#else
+#endif
+#ifdef IOCON
 #define PINMUX_BASE	IOCON
+#endif
+#ifdef MCI_IO_MUX
+#define PINMUX_BASE	MCI_IO_MUX
 #endif
 
 #define GPIO_MCUX_LPC_MODULE_IRQ_CONNECT(inst)						\
@@ -414,11 +457,10 @@ static const clock_ip_name_t gpio_clock_names[] = GPIO_CLOCKS;
 		.common = {								\
 			.port_pin_mask = GPIO_PORT_PIN_MASK_FROM_DT_INST(n),		\
 		},									\
-		.gpio_base = GPIO,							\
+		.gpio_base = (GPIO_Type *)DT_REG_ADDR(DT_INST_PARENT(n)),		\
 		.pinmux_base = PINMUX_BASE,						\
 		.int_source = DT_INST_ENUM_IDX(n, int_source),				\
-		.port_no = DT_INST_PROP(n, port),					\
-		.clock_ip_name = gpio_clock_names[DT_INST_PROP(n, port)],		\
+		.port_no = DT_INST_REG_ADDR(n)						\
 	};										\
 											\
 	static struct gpio_mcux_lpc_data gpio_mcux_lpc_data_##n;			\

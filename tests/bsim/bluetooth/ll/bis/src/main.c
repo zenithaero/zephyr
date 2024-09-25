@@ -58,7 +58,10 @@ static const struct bt_data per_ad_data2[] = {
 static uint8_t chan_map[] = { 0x1F, 0XF1, 0x1F, 0xF1, 0x1F };
 
 static bool volatile is_iso_connected;
+static uint8_t volatile is_iso_disconnected;
 static bool volatile deleting_pa_sync;
+
+#if !defined(CONFIG_TEST_LL_INTERFACE)
 static void iso_connected(struct bt_iso_chan *chan);
 static void iso_disconnected(struct bt_iso_chan *chan, uint8_t reason);
 static void iso_recv(struct bt_iso_chan *chan,
@@ -121,10 +124,11 @@ static isoal_status_t test_sink_sdu_emit(const struct isoal_sink             *si
 }
 
 static isoal_status_t test_sink_sdu_write(void *dbuf,
+					  const size_t sdu_written,
 					  const uint8_t *pdu_payload,
 					  const size_t consume_len)
 {
-	memcpy(dbuf, pdu_payload, consume_len);
+	memcpy((uint8_t *)dbuf + sdu_written, pdu_payload, consume_len);
 
 	return ISOAL_STATUS_OK;
 }
@@ -147,6 +151,258 @@ bool ll_data_path_sink_create(uint16_t handle, struct ll_iso_datapath *datapath,
 }
 #endif /* CONFIG_BT_CTLR_ISO_VENDOR_DATA_PATH */
 
+#define BUF_ALLOC_TIMEOUT_MS (30) /* milliseconds */
+NET_BUF_POOL_FIXED_DEFINE(tx_pool, CONFIG_BT_ISO_TX_BUF_COUNT,
+			  BT_ISO_SDU_BUF_SIZE(CONFIG_BT_ISO_TX_MTU),
+			  CONFIG_BT_CONN_TX_USER_DATA_SIZE, NULL);
+
+static struct k_work_delayable iso_send_work;
+
+BUILD_ASSERT(sizeof(seq_num) <= CONFIG_BT_ISO_TX_MTU);
+
+static void iso_send(struct k_work *work)
+{
+	static uint8_t iso_data[CONFIG_BT_ISO_TX_MTU];
+	static bool data_initialized;
+	struct net_buf *buf;
+	size_t iso_data_len;
+	int ret;
+
+	if (!data_initialized) {
+		data_initialized = true;
+
+		for (size_t i = 0; i < ARRAY_SIZE(iso_data); i++) {
+			iso_data[i] = (uint8_t)i;
+		}
+	}
+
+	buf = net_buf_alloc(&tx_pool, K_MSEC(BUF_ALLOC_TIMEOUT_MS));
+	if (!buf) {
+		FAIL("Data buffer allocate timeout on channel\n");
+		return;
+	}
+
+	net_buf_reserve(buf, BT_ISO_CHAN_SEND_RESERVE);
+	sys_put_le16(seq_num, iso_data);
+	iso_data_len = MAX(sizeof(seq_num), ((seq_num % CONFIG_BT_ISO_TX_MTU) + 1));
+	net_buf_add_mem(buf, iso_data, iso_data_len);
+
+	bs_trace_info_time(4, "ISO send: seq_num %u\n", seq_num);
+	ret = bt_iso_chan_send(&bis_iso_chan, buf, seq_num++);
+	if (ret < 0) {
+		FAIL("Unable to broadcast data on channel (%d)\n", ret);
+		net_buf_unref(buf);
+		return;
+	}
+
+	k_work_schedule(&iso_send_work, K_USEC(9970));
+}
+#endif /* !CONFIG_TEST_LL_INTERFACE */
+
+static void setup_ext_adv(struct bt_le_ext_adv **adv)
+{
+	int err;
+
+	printk("Create advertising set...");
+	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_NCONN, NULL, adv);
+	if (err) {
+		FAIL("Failed to create advertising set (err %d)\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Setting Periodic Advertising parameters...");
+	err = bt_le_per_adv_set_param(*adv, BT_LE_PER_ADV_DEFAULT);
+	if (err) {
+		FAIL("Failed to set periodic advertising parameters (err %d)\n",
+		     err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Enable Periodic Advertising...");
+	err = bt_le_per_adv_start(*adv);
+	if (err) {
+		FAIL("Failed to enable periodic advertising (err %d)\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Start extended advertising...");
+	err = bt_le_ext_adv_start(*adv, BT_LE_EXT_ADV_START_DEFAULT);
+	if (err) {
+		printk("Failed to start extended advertising (err %d)\n", err);
+		return;
+	}
+	printk("success.\n");
+}
+
+static void teardown_ext_adv(struct bt_le_ext_adv *adv)
+{
+	int err;
+
+	printk("Stop Periodic Advertising...");
+	err = bt_le_per_adv_stop(adv);
+	if (err) {
+		FAIL("Failed to stop periodic advertising (err %d)\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Stop Extended Advertising...");
+	err = bt_le_ext_adv_stop(adv);
+	if (err) {
+		FAIL("Failed to stop extended advertising (err %d)\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Deleting Extended Advertising...");
+	err = bt_le_ext_adv_delete(adv);
+	if (err) {
+		FAIL("Failed to delete extended advertising (err %d)\n", err);
+		return;
+	}
+	printk("success.\n");
+}
+
+#if defined(CONFIG_TEST_LL_INTERFACE)
+static void create_ll_big(uint8_t big_handle, struct bt_le_ext_adv *adv)
+{
+	uint16_t max_sdu = CONFIG_BT_CTLR_ADV_ISO_PDU_LEN_MAX;
+	uint8_t bcode[BT_ISO_BROADCAST_CODE_SIZE] = { 0 };
+	uint32_t sdu_interval = 10000; /* us */
+	uint16_t max_latency = 10; /* ms */
+	uint8_t encryption = 0;
+	uint8_t bis_count = 1; /* TODO: Add support for multiple BIS per BIG */
+	uint8_t phy = BIT(1);
+	uint8_t packing = 0;
+	uint8_t framing = 0;
+	uint8_t adv_handle;
+	uint8_t rtn = 0;
+	int err;
+
+	printk("Creating LL BIG...");
+	/* Assume that index == handle */
+	adv_handle = bt_le_ext_adv_get_index(adv);
+
+	err = ll_big_create(big_handle, adv_handle, bis_count, sdu_interval,
+			    max_sdu, max_latency, rtn, phy, packing, framing,
+			    encryption, bcode);
+	if (err) {
+		FAIL("Could not create BIG: %d\n", err);
+		return;
+	}
+	printk("success.\n");
+}
+
+static void terminate_ll_big(uint8_t big_handle)
+{
+	int err;
+
+	printk("Terminating LL BIG...");
+	err = ll_big_terminate(big_handle, BT_HCI_ERR_LOCALHOST_TERM_CONN);
+	if (err) {
+		FAIL("Could not terminate BIG: %d\n", err);
+		return;
+	}
+	printk("success.\n");
+}
+
+#else /* !CONFIG_TEST_LL_INTERFACE */
+static void create_big(struct bt_le_ext_adv *adv, struct bt_iso_big **big)
+{
+	struct bt_iso_big_create_param big_create_param = { 0 };
+	int err;
+
+	printk("Creating BIG...\n");
+	big_create_param.bis_channels = bis_channels;
+	big_create_param.num_bis = BIS_ISO_CHAN_COUNT;
+	big_create_param.encryption = false;
+	big_create_param.interval = 10000; /* us */
+	big_create_param.latency = 10; /* milliseconds */
+	big_create_param.packing = 0; /* 0 - sequential; 1 - interleaved */
+	big_create_param.framing = 0; /* 0 - unframed; 1 - framed */
+	iso_tx_qos.sdu = CONFIG_BT_ISO_TX_MTU; /* bytes */
+	iso_tx_qos.rtn = 2;
+	iso_tx_qos.phy = BT_GAP_LE_PHY_2M;
+	bis_iso_qos.tx = &iso_tx_qos;
+	bis_iso_qos.rx = NULL;
+	err = bt_iso_big_create(adv, &big_create_param, big);
+	if (err) {
+		FAIL("Could not create BIG: %d\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Wait for ISO connected callback...");
+	while (!is_iso_connected) {
+		k_sleep(K_MSEC(100));
+	}
+	printk("ISO connected\n");
+}
+
+static void terminate_big(struct bt_iso_big *big)
+{
+	int err;
+
+	printk("Terminating BIG...\n");
+	err = bt_iso_big_terminate(big);
+	if (err) {
+		FAIL("Could not terminate BIG: %d\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Wait for ISO disconnected callback...");
+	while (is_iso_disconnected == 0U) {
+		k_sleep(K_MSEC(100));
+	}
+	printk("ISO disconnected\n");
+}
+#endif /* !CONFIG_TEST_LL_INTERFACE */
+
+#if defined(CONFIG_BT_ISO_TEST_PARAMS)
+static void create_advanced_big(struct bt_le_ext_adv *adv, struct bt_iso_big **big)
+{
+	struct bt_iso_big_create_param big_create_param;
+	int err;
+
+	printk("Creating BIG...\n");
+	big_create_param.bis_channels = bis_channels;
+	big_create_param.num_bis = BIS_ISO_CHAN_COUNT;
+	big_create_param.encryption = false;
+	big_create_param.interval = 10000; /* us */
+	big_create_param.packing = 0; /* 0 - sequential; 1 - interleaved */
+	big_create_param.framing = 0; /* 0 - unframed; 1 - framed */
+	big_create_param.irc = BT_ISO_IRC_MIN;
+	big_create_param.pto = BT_ISO_PTO_MIN;
+	big_create_param.iso_interval = big_create_param.interval / 1250U; /* N * 10 ms */
+
+	iso_tx_qos.sdu = 502; /* bytes */
+	iso_tx_qos.phy = BT_GAP_LE_PHY_2M;
+	iso_tx_qos.max_pdu = BT_ISO_PDU_MAX;
+	iso_tx_qos.burst_number = BT_ISO_BN_MIN;
+
+	bis_iso_qos.tx = &iso_tx_qos;
+	bis_iso_qos.rx = NULL;
+	bis_iso_qos.num_subevents = BT_ISO_NSE_MIN;
+
+	err = bt_iso_big_create(adv, &big_create_param, big);
+	if (err) {
+		FAIL("Could not create BIG: %d\n", err);
+		return;
+	}
+	printk("success.\n");
+
+	printk("Wait for ISO connected callback...");
+	while (!is_iso_connected) {
+		k_sleep(K_MSEC(100));
+	}
+	printk("ISO connected\n");
+}
+#endif /* CONFIG_BT_ISO_TEST_PARAMS */
+
 static void test_iso_main(void)
 {
 	struct bt_le_ext_adv *adv;
@@ -162,112 +418,21 @@ static void test_iso_main(void)
 	}
 	printk("success.\n");
 
-	printk("Create advertising set...");
-	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_NCONN_NAME, NULL, &adv);
-	if (err) {
-		FAIL("Failed to create advertising set (err %d)\n", err);
-		return;
-	}
-	printk("success.\n");
+	setup_ext_adv(&adv);
 
-	printk("Setting Periodic Advertising parameters...");
-	err = bt_le_per_adv_set_param(adv, BT_LE_PER_ADV_DEFAULT);
-	if (err) {
-		FAIL("Failed to set periodic advertising parameters (err %d)\n",
-		     err);
-		return;
-	}
-	printk("success.\n");
-
-	printk("Enable Periodic Advertising...");
-	err = bt_le_per_adv_start(adv);
-	if (err) {
-		FAIL("Failed to enable periodic advertising (err %d)\n", err);
-		return;
-	}
-	printk("success.\n");
-
-	printk("Start extended advertising...");
-	err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
-	if (err) {
-		printk("Failed to start extended advertising (err %d)\n", err);
-		return;
-	}
-	printk("success.\n");
-
-
-#if TEST_LL_INTERFACE
-	printk("Creating BIG...");
-	uint16_t max_sdu = CONFIG_BT_CTLR_ADV_ISO_PDU_LEN_MAX;
-	uint8_t bcode[BT_ISO_BROADCAST_CODE_SIZE] = { 0 };
-	uint32_t sdu_interval = 10000; /* us */
-	uint16_t max_latency = 10; /* ms */
-	uint8_t encryption = 0;
+#if defined(CONFIG_TEST_LL_INTERFACE)
 	uint8_t big_handle = 0;
-	uint8_t bis_count = 1; /* TODO: Add support for multiple BIS per BIG */
-	uint8_t phy = BIT(1);
-	uint8_t packing = 0;
-	uint8_t framing = 0;
-	uint8_t adv_handle;
-	uint8_t rtn = 0;
 
-	/* Assume that index == handle */
-	adv_handle = bt_le_ext_adv_get_index(adv);
+	create_ll_big(big_handle, adv);
 
-	err = ll_big_create(big_handle, adv_handle, bis_count, sdu_interval,
-			    max_sdu, max_latency, rtn, phy, packing, framing,
-			    encryption, bcode);
-	if (err) {
-		FAIL("Could not create BIG: %d\n", err);
-		return;
-	}
-	printk("success.\n");
-#endif
-
-	printk("Creating BIG...\n");
-	struct bt_iso_big_create_param big_create_param;
+#else /* !CONFIG_TEST_LL_INTERFACE */
 	struct bt_iso_big *big;
 
-	big_create_param.bis_channels = bis_channels;
-	big_create_param.num_bis = BIS_ISO_CHAN_COUNT;
-	big_create_param.encryption = false;
-	big_create_param.interval = 10000; /* us */
-	big_create_param.latency = 10; /* milliseconds */
-	big_create_param.packing = 0; /* 0 - sequential; 1 - interleaved */
-	big_create_param.framing = 0; /* 0 - unframed; 1 - framed */
-	iso_tx_qos.sdu = 502; /* bytes */
-	iso_tx_qos.rtn = 2;
-	iso_tx_qos.phy = BT_GAP_LE_PHY_2M;
-	bis_iso_qos.tx = &iso_tx_qos;
-	bis_iso_qos.rx = NULL;
-	err = bt_iso_big_create(adv, &big_create_param, &big);
-	if (err) {
-		FAIL("Could not create BIG: %d\n", err);
-		return;
-	}
-	printk("success.\n");
+	create_big(adv, &big);
 
-	printk("Wait for ISO connected callback...");
-	while (!is_iso_connected) {
-		k_sleep(K_MSEC(100));
-	}
-	printk("ISO connected\n");
-
-	uint32_t iso_send_count = 0;
-	uint8_t iso_data[sizeof(iso_send_count)] = { 0 };
-	struct net_buf *buf;
-
-	buf = net_buf_alloc(&bis_tx_pool, K_FOREVER);
-	net_buf_reserve(buf, BT_ISO_CHAN_SEND_RESERVE);
-	sys_put_le32(++iso_send_count, iso_data);
-	net_buf_add_mem(buf, iso_data, sizeof(iso_data));
-	err = bt_iso_chan_send(&bis_iso_chan, buf, seq_num++, BT_ISO_TIMESTAMP_NONE);
-	if (err < 0) {
-		net_buf_unref(buf);
-		FAIL("Unable to broadcast data (%d)", err);
-		return;
-	}
-	printk("Sending value %u\n", iso_send_count);
+	k_work_init_delayable(&iso_send_work, iso_send);
+	k_work_schedule(&iso_send_work, K_NO_WAIT);
+#endif /* !CONFIG_TEST_LL_INTERFACE */
 
 	k_sleep(K_MSEC(5000));
 
@@ -283,7 +448,7 @@ static void test_iso_main(void)
 	k_sleep(K_MSEC(2500));
 
 	printk("Periodic Advertising and ISO Channel Map Update...");
-	err = ll_chm_update(chan_map);
+	err = bt_le_set_chan_map(chan_map);
 	if (err) {
 		FAIL("Channel Map Update failed.\n");
 	}
@@ -302,34 +467,30 @@ static void test_iso_main(void)
 
 	k_sleep(K_MSEC(5000));
 
-#if TEST_LL_INTERFACE
-	printk("Terminating BIG...");
-	err = ll_big_terminate(big_handle, BT_HCI_ERR_LOCALHOST_TERM_CONN);
-	if (err) {
-		FAIL("Could not terminate BIG: %d\n", err);
-		return;
-	}
-	printk("success.\n");
-#endif
+#if defined(CONFIG_TEST_LL_INTERFACE)
+	terminate_ll_big(big_handle);
 
-	printk("Terminating BIG...\n");
-	err = bt_iso_big_terminate(big);
-	if (err) {
-		FAIL("Could not terminate BIG: %d\n", err);
-		return;
-	}
-	printk("success.\n");
+#else /* !CONFIG_TEST_LL_INTERFACE */
+	k_work_cancel_delayable(&iso_send_work);
+
+	terminate_big(big);
+	big = NULL;
+
+#if defined(CONFIG_BT_ISO_TEST_PARAMS)
+	/* Quick check to just verify that creating a BIG using advanced/test
+	 * parameters work
+	 */
+	create_advanced_big(adv, &big);
+
+	terminate_big(big);
+	big = NULL;
+#endif /* CONFIG_BT_ISO_TEST_PARAMS */
+#endif /* !CONFIG_TEST_LL_INTERFACE */
 
 	k_sleep(K_MSEC(10000));
 
-	printk("Stop Periodic Advertising...");
-	err = bt_le_per_adv_stop(adv);
-	if (err) {
-		FAIL("Failed to stop periodic advertising (err %d)\n", err);
-		return;
-	}
-	printk("success.\n");
-
+	teardown_ext_adv(adv);
+	adv = NULL;
 
 	PASS("ISO tests Passed\n");
 
@@ -347,11 +508,77 @@ static const char *phy2str(uint8_t phy)
 	}
 }
 
+#if !defined(CONFIG_TEST_LL_INTERFACE)
+/** Print data as d_0 d_1 d_2 ... d_(n-2) d_(n-1) d_(n) to show the 3 first and 3 last octets
+ *
+ * Examples:
+ * 01
+ * 0102
+ * 010203
+ * 01020304
+ * 0102030405
+ * 010203040506
+ * 010203...050607
+ * 010203...060708
+ * etc.
+ */
+static void iso_print_data(uint8_t *data, size_t data_len)
+{
+	/* Maximum number of octets from each end of the data */
+	const uint8_t max_octets = 3;
+	char data_str[35];
+	size_t str_len;
+
+	str_len = bin2hex(data, MIN(max_octets, data_len), data_str, sizeof(data_str));
+	if (data_len > max_octets) {
+		if (data_len > (max_octets * 2)) {
+			static const char dots[] = "...";
+
+			strcat(&data_str[str_len], dots);
+			str_len += strlen(dots);
+		}
+
+		str_len += bin2hex(data + (data_len - MIN(max_octets, data_len - max_octets)),
+				   MIN(max_octets, data_len - max_octets),
+				   data_str + str_len,
+				   sizeof(data_str) - str_len);
+	}
+
+	printk("\t %s\n", data_str);
+}
+
+#define SEQ_NUM_MAX 1000U
+static uint16_t expected_seq_num[CONFIG_BT_ISO_MAX_CHAN];
+
 static void iso_recv(struct bt_iso_chan *chan,
 		     const struct bt_iso_recv_info *info, struct net_buf *buf)
 {
-	printk("Incoming data channel %p len %u, flags %u, seq_num %u, ts %u\n",
-		chan, buf->len, info->flags, info->seq_num, info->ts);
+	uint16_t seq_num;
+	uint8_t index;
+
+	index = bt_conn_index(chan->iso);
+
+	printk("Incoming data channel %p (%u) flags 0x%x seq_num %u ts %u len %u:\n",
+	       chan, index, info->flags, info->seq_num, info->ts, buf->len);
+	iso_print_data(buf->data, buf->len);
+
+	seq_num = sys_get_le16(buf->data);
+	if (info->flags & BT_ISO_FLAGS_VALID) {
+		if (seq_num != expected_seq_num[index]) {
+			if (expected_seq_num[index]) {
+				FAIL("ISO data miss match, expected %u actual %u\n",
+				     expected_seq_num[index], seq_num);
+			}
+			expected_seq_num[index] = seq_num;
+		}
+
+		expected_seq_num[index]++;
+
+	} else if (expected_seq_num[index] &&
+		   expected_seq_num[index] < SEQ_NUM_MAX) {
+		FAIL("%s: Invalid ISO data after valid ISO data reception.\n"
+		     "Expected %u\n", __func__, expected_seq_num[index]);
+	}
 }
 
 static void iso_connected(struct bt_iso_chan *chan)
@@ -362,14 +589,13 @@ static void iso_connected(struct bt_iso_chan *chan)
 	is_iso_connected = true;
 }
 
-static uint8_t volatile is_iso_disconnected;
-
 static void iso_disconnected(struct bt_iso_chan *chan, uint8_t reason)
 {
 	printk("ISO Channel %p disconnected with reason 0x%02x\n", chan, reason);
 
 	is_iso_disconnected = reason;
 }
+#endif /* !CONFIG_TEST_LL_INTERFACE */
 
 static bool volatile is_sync;
 
@@ -527,7 +753,7 @@ static struct bt_le_scan_cb scan_callbacks = {
 static void test_iso_recv_main(void)
 {
 	struct bt_le_scan_param scan_param = {
-		.type       = BT_HCI_LE_SCAN_ACTIVE,
+		.type       = BT_LE_SCAN_TYPE_ACTIVE,
 		.options    = BT_LE_SCAN_OPT_NONE,
 		.interval   = 0x0004,
 		.window     = 0x0004,
@@ -604,18 +830,17 @@ static void test_iso_recv_main(void)
 	}
 	printk("success.\n");
 
-#if TEST_LL_INTERFACE
-	printk("Creating BIG Sync...");
+#if defined(CONFIG_TEST_LL_INTERFACE)
 	uint8_t bcode[BT_ISO_BROADCAST_CODE_SIZE] = { 0 };
 	uint16_t sync_timeout = 10;
+	uint8_t bis[1] = { 0x01, };
 	uint8_t big_handle = 0;
-	uint8_t bis_handle = 0;
 	uint8_t encryption = 0;
-	uint8_t bis_count = 1; /* TODO: Add support for multiple BIS per BIG */
 	uint8_t mse = 0;
 
+	printk("Creating BIG Sync...");
 	err = ll_big_sync_create(big_handle, sync->handle, encryption, bcode,
-				 mse, sync_timeout, bis_count, &bis_handle);
+				 mse, sync_timeout, ARRAY_SIZE(bis), bis);
 	if (err) {
 		FAIL("Could not create BIG sync: %d\n", err);
 		return;
@@ -624,18 +849,8 @@ static void test_iso_recv_main(void)
 
 	k_sleep(K_MSEC(5000));
 
-	printk("Deleting Periodic Advertising Sync...");
-	deleting_pa_sync = true;
-	err = bt_le_per_adv_sync_delete(sync);
-	if (err) {
-		FAIL("Failed to delete periodic advertising sync (err %d)\n",
-		     err);
-		return;
-	}
-	printk("success.\n");
-
 	printk("Terminating BIG Sync...");
-	struct node_rx_hdr *node_rx = NULL;
+	struct node_rx_pdu *node_rx = NULL;
 	err = ll_big_sync_terminate(big_handle, (void **)&node_rx);
 	if (err) {
 		FAIL("Could not terminate BIG sync: %d\n", err);
@@ -651,7 +866,7 @@ static void test_iso_recv_main(void)
 
 	printk("Creating BIG Sync after terminate...");
 	err = ll_big_sync_create(big_handle, sync->handle, encryption, bcode,
-				 mse, sync_timeout, bis_count, &bis_handle);
+				 mse, sync_timeout, ARRAY_SIZE(bis), bis);
 	if (err) {
 		FAIL("Could not create BIG sync: %d\n", err);
 		return;
@@ -668,10 +883,21 @@ static void test_iso_recv_main(void)
 	printk("success.\n");
 
 	if (node_rx) {
-		node_rx->next = NULL;
+		node_rx->hdr.next = NULL;
 		ll_rx_mem_release((void **)&node_rx);
 	}
-#else
+
+	printk("Deleting Periodic Advertising Sync...");
+	deleting_pa_sync = true;
+	err = bt_le_per_adv_sync_delete(sync);
+	if (err) {
+		FAIL("Failed to delete periodic advertising sync (err %d)\n",
+		     err);
+		return;
+	}
+	printk("success.\n");
+
+#else /* !CONFIG_TEST_LL_INTERFACE */
 	struct bt_iso_big_sync_param big_param = { 0, };
 	struct bt_iso_big *big;
 
@@ -681,7 +907,7 @@ static void test_iso_recv_main(void)
 	bis_iso_qos.rx = &iso_rx_qos;
 	big_param.bis_channels = bis_channels;
 	big_param.num_bis = BIS_ISO_CHAN_COUNT;
-	big_param.bis_bitfield = BIT(1); /* BIS 1 selected */
+	big_param.bis_bitfield = BT_ISO_BIS_INDEX_BIT(1); /* BIS 1 selected */
 	big_param.mse = 1;
 	big_param.sync_timeout = 100; /* 1000 ms */
 	big_param.encryption = false;
@@ -721,6 +947,7 @@ static void test_iso_recv_main(void)
 	printk("ISO BIG create sync (test remote disconnect)...");
 	is_iso_connected = false;
 	is_iso_disconnected = 0U;
+	memset(expected_seq_num, 0U, sizeof(expected_seq_num));
 	err = bt_iso_big_sync(sync, &big_param, &big);
 	if (err) {
 		FAIL("Could not create BIG sync: %d\n", err);
@@ -782,7 +1009,15 @@ static void test_iso_recv_main(void)
 		return;
 	}
 	printk("success.\n");
-#endif
+
+	for (int chan = 0; chan < CONFIG_BT_ISO_MAX_CHAN; chan++) {
+		if (expected_seq_num[chan] < SEQ_NUM_MAX) {
+			FAIL("ISO Data reception incomplete %u (%u).\n",
+			     expected_seq_num[chan], SEQ_NUM_MAX);
+			return;
+		}
+	}
+#endif /* !CONFIG_TEST_LL_INTERFACE */
 
 	PASS("ISO recv test Passed\n");
 
@@ -793,7 +1028,7 @@ static void test_iso_recv_main(void)
 static void test_iso_recv_vs_dp_main(void)
 {
 	struct bt_le_scan_param scan_param = {
-		.type       = BT_HCI_LE_SCAN_ACTIVE,
+		.type       = BT_LE_SCAN_TYPE_ACTIVE,
 		.options    = BT_LE_SCAN_OPT_NONE,
 		.interval   = 0x0004,
 		.window     = 0x0004,
@@ -889,7 +1124,7 @@ static void test_iso_recv_vs_dp_main(void)
 	bis_iso_qos.rx = &iso_rx_qos;
 	big_param.bis_channels = bis_channels;
 	big_param.num_bis = BIS_ISO_CHAN_COUNT;
-	big_param.bis_bitfield = BIT(1); /* BIS 1 selected */
+	big_param.bis_bitfield = BT_ISO_BIS_INDEX_BIT(1); /* BIS 1 selected */
 	big_param.mse = 1;
 	big_param.sync_timeout = 100; /* 1000 ms */
 	big_param.encryption = false;
@@ -971,14 +1206,14 @@ static const struct bst_test_instance test_def[] = {
 	{
 		.test_id = "broadcast",
 		.test_descr = "ISO broadcast",
-		.test_post_init_f = test_iso_init,
+		.test_pre_init_f = test_iso_init,
 		.test_tick_f = test_iso_tick,
 		.test_main_f = test_iso_main
 	},
 	{
 		.test_id = "receive",
 		.test_descr = "ISO receive",
-		.test_post_init_f = test_iso_init,
+		.test_pre_init_f = test_iso_init,
 		.test_tick_f = test_iso_tick,
 		.test_main_f = test_iso_recv_main
 	},
@@ -986,7 +1221,7 @@ static const struct bst_test_instance test_def[] = {
 	{
 		.test_id = "receive_vs_dp",
 		.test_descr = "ISO receive VS",
-		.test_post_init_f = test_iso_init,
+		.test_pre_init_f = test_iso_init,
 		.test_tick_f = test_iso_tick,
 		.test_main_f = test_iso_recv_vs_dp_main
 	},

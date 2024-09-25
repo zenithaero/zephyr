@@ -50,6 +50,41 @@ void lwm2m_registry_unlock(void)
 {
 	(void)k_mutex_unlock(&registry_lock);
 }
+
+/* Default core object version */
+struct default_obj_version {
+	uint16_t obj_id;
+	uint8_t version_major;
+	uint8_t version_minor;
+};
+
+/* Based on Appendix E of the respective LwM2M specification. */
+static const struct default_obj_version default_obj_versions[] = {
+#if defined(CONFIG_LWM2M_VERSION_1_0)
+	{ LWM2M_OBJECT_SECURITY_ID, 1, 0 },
+	{ LWM2M_OBJECT_SERVER_ID, 1, 0 },
+	{ LWM2M_OBJECT_ACCESS_CONTROL_ID, 1, 0 },
+	{ LWM2M_OBJECT_DEVICE_ID, 1, 0 },
+	{ LWM2M_OBJECT_CONNECTIVITY_MONITORING_ID, 1, 0 },
+	{ LWM2M_OBJECT_FIRMWARE_ID, 1, 0 },
+	{ LWM2M_OBJECT_LOCATION_ID, 1, 0 },
+	{ LWM2M_OBJECT_CONNECTIVITY_STATISTICS_ID, 1, 0 },
+#elif defined(CONFIG_LWM2M_VERSION_1_1)
+	{ LWM2M_OBJECT_SECURITY_ID, 1, 1 },
+	{ LWM2M_OBJECT_SERVER_ID, 1, 1 },
+	{ LWM2M_OBJECT_ACCESS_CONTROL_ID, 1, 0 },
+	{ LWM2M_OBJECT_DEVICE_ID, 1, 1 },
+	{ LWM2M_OBJECT_CONNECTIVITY_MONITORING_ID, 1, 2 },
+	{ LWM2M_OBJECT_FIRMWARE_ID, 1, 0 },
+	{ LWM2M_OBJECT_LOCATION_ID, 1, 0 },
+	{ LWM2M_OBJECT_CONNECTIVITY_STATISTICS_ID, 1, 0 },
+	/* OSCORE object not implemented yet, but include it for completeness */
+	{ LWM2M_OBJECT_OSCORE_ID, 1, 0 },
+#else
+#error "Default core object versions not defined for LwM2M version"
+#endif
+};
+
 /* Resources */
 static sys_slist_t engine_obj_list;
 static sys_slist_t engine_obj_inst_list;
@@ -71,7 +106,7 @@ void lwm2m_register_obj(struct lwm2m_engine_obj *obj)
 	k_mutex_lock(&registry_lock, K_FOREVER);
 #if defined(CONFIG_LWM2M_ACCESS_CONTROL_ENABLE)
 	/* If bootstrap, then bootstrap server should create the ac obj instances */
-#if !IS_ENABLED(CONFIG_LWM2M_RD_CLIENT_SUPPORT_BOOTSTRAP)
+#if !defined(CONFIG_LWM2M_RD_CLIENT_SUPPORT_BOOTSTRAP)
 	int server_obj_inst_id = lwm2m_server_short_id_to_inst(CONFIG_LWM2M_SERVER_DEFAULT_SSID);
 
 	access_control_add_obj(obj->obj_id, server_obj_inst_id);
@@ -134,7 +169,7 @@ static void engine_register_obj_inst(struct lwm2m_engine_obj_inst *obj_inst)
 {
 #if defined(CONFIG_LWM2M_ACCESS_CONTROL_ENABLE)
 	/* If bootstrap, then bootstrap server should create the ac obj instances */
-#if !IS_ENABLED(CONFIG_LWM2M_RD_CLIENT_SUPPORT_BOOTSTRAP)
+#if !defined(CONFIG_LWM2M_RD_CLIENT_SUPPORT_BOOTSTRAP)
 	int server_obj_inst_id = lwm2m_server_short_id_to_inst(CONFIG_LWM2M_SERVER_DEFAULT_SSID);
 
 	access_control_add(obj_inst->obj->obj_id, obj_inst->obj_inst_id, server_obj_inst_id);
@@ -301,22 +336,6 @@ int lwm2m_create_object_inst(const struct lwm2m_obj_path *path)
 	return 0;
 }
 
-int lwm2m_engine_create_obj_inst(const char *pathstr)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	LOG_DBG("path:%s", pathstr);
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_create_object_inst(&path);
-}
-
 int lwm2m_delete_object_inst(const struct lwm2m_obj_path *path)
 {
 	int ret = 0;
@@ -334,22 +353,6 @@ int lwm2m_delete_object_inst(const struct lwm2m_obj_path *path)
 	engine_trigger_update(true);
 
 	return 0;
-}
-
-int lwm2m_engine_delete_obj_inst(const char *pathstr)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	LOG_DBG("path: %s", pathstr);
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_delete_object_inst(&path);
 }
 
 struct lwm2m_engine_obj_inst *lwm2m_engine_get_obj_inst(const struct lwm2m_obj_path *path)
@@ -436,6 +439,22 @@ int path_to_objs(const struct lwm2m_obj_path *path, struct lwm2m_engine_obj_inst
 
 	return 0;
 }
+
+static bool is_string(const struct lwm2m_obj_path *path)
+{
+	struct lwm2m_engine_obj_field *obj_field;
+	int ret;
+
+	ret = path_to_objs(path, NULL, &obj_field, NULL, NULL);
+	if (ret < 0 || !obj_field) {
+		return false;
+	}
+	if (obj_field->data_type == LWM2M_RES_TYPE_STRING) {
+		return true;
+	}
+	return false;
+}
+
 /* User data setter functions */
 
 int lwm2m_set_res_buf(const struct lwm2m_obj_path *path, void *buffer_ptr, uint16_t buffer_len,
@@ -473,36 +492,6 @@ int lwm2m_set_res_buf(const struct lwm2m_obj_path *path, void *buffer_ptr, uint1
 	return ret;
 }
 
-int lwm2m_engine_set_res_buf(const char *pathstr, void *buffer_ptr, uint16_t buffer_len,
-			     uint16_t data_len, uint8_t data_flags)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_set_res_buf(&path, buffer_ptr, buffer_len, data_len, data_flags);
-}
-
-int lwm2m_engine_set_res_data(const char *pathstr, void *data_ptr, uint16_t data_len,
-			      uint8_t data_flags)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_set_res_buf(&path, data_ptr, data_len, data_len, data_flags);
-}
-
 static bool lwm2m_validate_time_resource_lenghts(uint16_t resource_length, uint16_t buf_length)
 {
 	if (resource_length != sizeof(time_t) && resource_length != sizeof(uint32_t)) {
@@ -526,6 +515,7 @@ static int lwm2m_check_buf_sizes(uint8_t data_type, uint16_t resource_length, ui
 		}
 		break;
 	case LWM2M_RES_TYPE_U32:
+	case LWM2M_RES_TYPE_U16:
 	case LWM2M_RES_TYPE_U8:
 	case LWM2M_RES_TYPE_S64:
 	case LWM2M_RES_TYPE_S32:
@@ -610,14 +600,14 @@ static int lwm2m_engine_set(const struct lwm2m_obj_path *path, const void *value
 		return ret;
 	}
 
-	if (memcmp(data_ptr, value, len) != 0) {
+	if (memcmp(data_ptr, value, len) != 0 || res_inst->data_len != len) {
 		changed = true;
 	}
 
 #if CONFIG_LWM2M_ENGINE_VALIDATION_BUFFER_SIZE > 0
 	if (res->validate_cb) {
 		ret = res->validate_cb(obj_inst->obj_inst_id, res->res_id, res_inst->res_inst_id,
-				       (uint8_t *)value, len, false, 0);
+				       (uint8_t *)value, len, false, 0, 0);
 		if (ret < 0) {
 			k_mutex_unlock(&registry_lock);
 			return -EINVAL;
@@ -628,19 +618,18 @@ static int lwm2m_engine_set(const struct lwm2m_obj_path *path, const void *value
 	switch (obj_field->data_type) {
 
 	case LWM2M_RES_TYPE_OPAQUE:
-		memcpy((uint8_t *)data_ptr, value, len);
+		if (len) {
+			memcpy((uint8_t *)data_ptr, value, len);
+		}
 		break;
 
 	case LWM2M_RES_TYPE_STRING:
-		/* check length (note: we add 1 to string length for NULL pad) */
-		if (len > max_data_len - 1) {
-			LOG_ERR("String length %u is too long for res instance %d data", len,
-				path->res_id);
-			k_mutex_unlock(&registry_lock);
-			return -ENOMEM;
+		if (len) {
+			strncpy(data_ptr, value, len - 1);
+			((char *)data_ptr)[len - 1] = '\0';
+		} else {
+			((char *)data_ptr)[0] = '\0';
 		}
-		memcpy((uint8_t *)data_ptr, value, len);
-		((uint8_t *)data_ptr)[len] = '\0';
 		break;
 
 	case LWM2M_RES_TYPE_U32:
@@ -724,7 +713,7 @@ static int lwm2m_engine_set(const struct lwm2m_obj_path *path, const void *value
 
 	if (res->post_write_cb) {
 		ret = res->post_write_cb(obj_inst->obj_inst_id, res->res_id, res_inst->res_inst_id,
-					 data_ptr, len, false, 0);
+					 data_ptr, len, false, 0, 0);
 	}
 
 	if (changed && LWM2M_HAS_PERM(obj_field, LWM2M_PERM_R)) {
@@ -739,33 +728,16 @@ int lwm2m_set_opaque(const struct lwm2m_obj_path *path, const char *data_ptr, ui
 	return lwm2m_engine_set(path, data_ptr, data_len);
 }
 
-int lwm2m_engine_set_opaque(const char *pathstr, const char *data_ptr, uint16_t data_len)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_opaque(&path, data_ptr, data_len);
-}
-
 int lwm2m_set_string(const struct lwm2m_obj_path *path, const char *data_ptr)
 {
-	return lwm2m_engine_set(path, data_ptr, strlen(data_ptr));
-}
+	uint16_t len = strlen(data_ptr);
 
-int lwm2m_engine_set_string(const char *pathstr, const char *data_ptr)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
+	/* String resources contain terminator as well, opaque resources don't */
+	if (is_string(path)) {
+		len += 1;
 	}
-	return lwm2m_set_string(&path, data_ptr);
+
+	return lwm2m_engine_set(path, data_ptr, len);
 }
 
 int lwm2m_set_u8(const struct lwm2m_obj_path *path, uint8_t value)
@@ -773,33 +745,9 @@ int lwm2m_set_u8(const struct lwm2m_obj_path *path, uint8_t value)
 	return lwm2m_engine_set(path, &value, 1);
 }
 
-int lwm2m_engine_set_u8(const char *pathstr, uint8_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_u8(&path, value);
-}
-
 int lwm2m_set_u16(const struct lwm2m_obj_path *path, uint16_t value)
 {
 	return lwm2m_engine_set(path, &value, 2);
-}
-
-int lwm2m_engine_set_u16(const char *pathstr, uint16_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_u16(&path, value);
 }
 
 int lwm2m_set_u32(const struct lwm2m_obj_path *path, uint32_t value)
@@ -807,50 +755,9 @@ int lwm2m_set_u32(const struct lwm2m_obj_path *path, uint32_t value)
 	return lwm2m_engine_set(path, &value, 4);
 }
 
-int lwm2m_engine_set_u32(const char *pathstr, uint32_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_u32(&path, value);
-}
-
-int lwm2m_set_u64(const struct lwm2m_obj_path *path, uint64_t value)
-{
-	return lwm2m_engine_set(path, &value, 8);
-}
-
-int lwm2m_engine_set_u64(const char *pathstr, uint64_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_u64(&path, value);
-}
-
 int lwm2m_set_s8(const struct lwm2m_obj_path *path, int8_t value)
 {
 	return lwm2m_engine_set(path, &value, 1);
-}
-
-int lwm2m_engine_set_s8(const char *pathstr, int8_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_s8(&path, value);
 }
 
 int lwm2m_set_s16(const struct lwm2m_obj_path *path, int16_t value)
@@ -859,50 +766,14 @@ int lwm2m_set_s16(const struct lwm2m_obj_path *path, int16_t value)
 
 }
 
-int lwm2m_engine_set_s16(const char *pathstr, int16_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_s16(&path, value);
-}
-
 int lwm2m_set_s32(const struct lwm2m_obj_path *path, int32_t value)
 {
 	return lwm2m_engine_set(path, &value, 4);
 }
 
-int lwm2m_engine_set_s32(const char *pathstr, int32_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_s32(&path, value);
-}
-
 int lwm2m_set_s64(const struct lwm2m_obj_path *path, int64_t value)
 {
 	return lwm2m_engine_set(path, &value, 8);
-}
-
-int lwm2m_engine_set_s64(const char *pathstr, int64_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_s64(&path, value);
 }
 
 int lwm2m_set_bool(const struct lwm2m_obj_path *path, bool value)
@@ -912,33 +783,9 @@ int lwm2m_set_bool(const struct lwm2m_obj_path *path, bool value)
 	return lwm2m_engine_set(path, &temp, 1);
 }
 
-int lwm2m_engine_set_bool(const char *pathstr, bool value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_bool(&path, value);
-}
-
 int lwm2m_set_f64(const struct lwm2m_obj_path *path, const double value)
 {
 	return lwm2m_engine_set(path, &value, sizeof(double));
-}
-
-int lwm2m_engine_set_float(const char *pathstr, const double *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_f64(&path, *value);
 }
 
 int lwm2m_set_objlnk(const struct lwm2m_obj_path *path, const struct lwm2m_objlnk *value)
@@ -946,33 +793,9 @@ int lwm2m_set_objlnk(const struct lwm2m_obj_path *path, const struct lwm2m_objln
 	return lwm2m_engine_set(path, value, sizeof(struct lwm2m_objlnk));
 }
 
-int lwm2m_engine_set_objlnk(const char *pathstr, const struct lwm2m_objlnk *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_objlnk(&path, value);
-}
-
 int lwm2m_set_time(const struct lwm2m_obj_path *path, time_t value)
 {
 	return lwm2m_engine_set(path, &value, sizeof(time_t));
-}
-
-int lwm2m_engine_set_time(const char *pathstr, time_t value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_set_time(&path, value);
 }
 
 int lwm2m_set_res_data_len(const struct lwm2m_obj_path *path, uint16_t data_len)
@@ -988,20 +811,6 @@ int lwm2m_set_res_data_len(const struct lwm2m_obj_path *path, uint16_t data_len)
 		return ret;
 	}
 	return lwm2m_set_res_buf(path, buffer_ptr, buffer_len, data_len, data_flags);
-}
-
-int lwm2m_engine_set_res_data_len(const char *pathstr, uint16_t data_len)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_set_res_data_len(&path, data_len);
 }
 /* User data getter functions */
 
@@ -1045,36 +854,6 @@ int lwm2m_get_res_buf(const struct lwm2m_obj_path *path, void **buffer_ptr, uint
 
 	k_mutex_unlock(&registry_lock);
 	return 0;
-}
-
-int lwm2m_engine_get_res_buf(const char *pathstr, void **buffer_ptr, uint16_t *buffer_len,
-			     uint16_t *data_len, uint8_t *data_flags)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_get_res_buf(&path, buffer_ptr, buffer_len, data_len, data_flags);
-}
-
-int lwm2m_engine_get_res_data(const char *pathstr, void **data_ptr, uint16_t *data_len,
-			      uint8_t *data_flags)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_get_res_buf(&path, data_ptr, NULL, data_len, data_flags);
 }
 
 static int lwm2m_engine_get(const struct lwm2m_obj_path *path, void *buf, uint16_t buflen)
@@ -1134,7 +913,8 @@ static int lwm2m_engine_get(const struct lwm2m_obj_path *path, void *buf, uint16
 			break;
 
 		case LWM2M_RES_TYPE_STRING:
-			strncpy((uint8_t *)buf, (uint8_t *)data_ptr, buflen);
+			strncpy(buf, data_ptr, data_len - 1);
+			((char *)buf)[data_len - 1] = '\0';
 			break;
 
 		case LWM2M_RES_TYPE_U32:
@@ -1207,6 +987,9 @@ static int lwm2m_engine_get(const struct lwm2m_obj_path *path, void *buf, uint16
 			k_mutex_unlock(&registry_lock);
 			return -EINVAL;
 		}
+	} else if (obj_field->data_type == LWM2M_RES_TYPE_STRING) {
+		/* Ensure empty string when there is no data */
+		((char *)buf)[0] = '\0';
 	}
 	k_mutex_unlock(&registry_lock);
 	return 0;
@@ -1217,33 +1000,15 @@ int lwm2m_get_opaque(const struct lwm2m_obj_path *path, void *buf, uint16_t bufl
 	return lwm2m_engine_get(path, buf, buflen);
 }
 
-int lwm2m_engine_get_opaque(const char *pathstr, void *buf, uint16_t buflen)
+int lwm2m_get_string(const struct lwm2m_obj_path *path, void *str, uint16_t buflen)
 {
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
+	/* Ensure termination, in case resource is not a string type */
+	if (!is_string(path)) {
+		memset(str, 0, buflen);
+		buflen -= 1; /* Last terminator cannot be overwritten */
 	}
-	return lwm2m_get_opaque(&path, buf, buflen);
-}
 
-int lwm2m_get_string(const struct lwm2m_obj_path *path, void *str, uint16_t strlen)
-{
-	return lwm2m_engine_get(path, str, strlen);
-}
-
-int lwm2m_engine_get_string(const char *pathstr, void *str, uint16_t strlen)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_opaque(&path, str, strlen);
+	return lwm2m_engine_get(path, str, buflen);
 }
 
 int lwm2m_get_u8(const struct lwm2m_obj_path *path, uint8_t *value)
@@ -1251,33 +1016,9 @@ int lwm2m_get_u8(const struct lwm2m_obj_path *path, uint8_t *value)
 	return lwm2m_engine_get(path, value, 1);
 }
 
-int lwm2m_engine_get_u8(const char *pathstr, uint8_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_u8(&path, value);
-}
-
 int lwm2m_get_u16(const struct lwm2m_obj_path *path, uint16_t *value)
 {
 	return lwm2m_engine_get(path, value, 2);
-}
-
-int lwm2m_engine_get_u16(const char *pathstr, uint16_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_u16(&path, value);
 }
 
 int lwm2m_get_u32(const struct lwm2m_obj_path *path, uint32_t *value)
@@ -1285,50 +1026,9 @@ int lwm2m_get_u32(const struct lwm2m_obj_path *path, uint32_t *value)
 	return lwm2m_engine_get(path, value, 4);
 }
 
-int lwm2m_engine_get_u32(const char *pathstr, uint32_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_u32(&path, value);
-}
-
-int lwm2m_get_u64(const struct lwm2m_obj_path *path, uint64_t *value)
-{
-	return lwm2m_engine_get(path, value, 8);
-}
-
-int lwm2m_engine_get_u64(const char *pathstr, uint64_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_u64(&path, value);
-}
-
 int lwm2m_get_s8(const struct lwm2m_obj_path *path, int8_t *value)
 {
 	return lwm2m_engine_get(path, value, 1);
-}
-
-int lwm2m_engine_get_s8(const char *pathstr, int8_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_s8(&path, value);
 }
 
 int lwm2m_get_s16(const struct lwm2m_obj_path *path, int16_t *value)
@@ -1336,50 +1036,14 @@ int lwm2m_get_s16(const struct lwm2m_obj_path *path, int16_t *value)
 	return lwm2m_engine_get(path, value, 2);
 }
 
-int lwm2m_engine_get_s16(const char *pathstr, int16_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_s16(&path, value);
-}
-
 int lwm2m_get_s32(const struct lwm2m_obj_path *path, int32_t *value)
 {
 	return lwm2m_engine_get(path, value, 4);
 }
 
-int lwm2m_engine_get_s32(const char *pathstr, int32_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_s32(&path, value);
-}
-
 int lwm2m_get_s64(const struct lwm2m_obj_path *path, int64_t *value)
 {
 	return lwm2m_engine_get(path, value, 8);
-}
-
-int lwm2m_engine_get_s64(const char *pathstr, int64_t *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_s64(&path, value);
 }
 
 int lwm2m_get_bool(const struct lwm2m_obj_path *path, bool *value)
@@ -1395,33 +1059,9 @@ int lwm2m_get_bool(const struct lwm2m_obj_path *path, bool *value)
 	return ret;
 }
 
-int lwm2m_engine_get_bool(const char *pathstr, bool *value)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_bool(&path, value);
-}
-
 int lwm2m_get_f64(const struct lwm2m_obj_path *path, double *value)
 {
 	return lwm2m_engine_get(path, value, sizeof(double));
-}
-
-int lwm2m_engine_get_float(const char *pathstr, double *buf)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_f64(&path, buf);
 }
 
 int lwm2m_get_objlnk(const struct lwm2m_obj_path *path, struct lwm2m_objlnk *buf)
@@ -1429,33 +1069,9 @@ int lwm2m_get_objlnk(const struct lwm2m_obj_path *path, struct lwm2m_objlnk *buf
 	return lwm2m_engine_get(path, buf, sizeof(struct lwm2m_objlnk));
 }
 
-int lwm2m_engine_get_objlnk(const char *pathstr, struct lwm2m_objlnk *buf)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_objlnk(&path, buf);
-}
-
 int lwm2m_get_time(const struct lwm2m_obj_path *path, time_t *buf)
 {
 	return lwm2m_engine_get(path, buf, sizeof(time_t));
-}
-
-int lwm2m_engine_get_time(const char *pathstr, time_t *buf)
-{
-	struct lwm2m_obj_path path;
-	int ret = 0;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-	return lwm2m_get_time(&path, buf);
 }
 
 int lwm2m_get_resource(const struct lwm2m_obj_path *path, struct lwm2m_engine_res **res)
@@ -1466,19 +1082,6 @@ int lwm2m_get_resource(const struct lwm2m_obj_path *path, struct lwm2m_engine_re
 	}
 
 	return path_to_objs(path, NULL, NULL, res, NULL);
-}
-
-int lwm2m_engine_get_resource(const char *pathstr, struct lwm2m_engine_res **res)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_get_resource(&path, res);
 }
 
 size_t lwm2m_engine_get_opaque_more(struct lwm2m_input_context *in, uint8_t *buf, size_t buflen,
@@ -1624,19 +1227,6 @@ int lwm2m_create_res_inst(const struct lwm2m_obj_path *path)
 	return lwm2m_engine_allocate_resource_instance(res, &res_inst, path->res_inst_id);
 }
 
-int lwm2m_engine_create_res_inst(const char *pathstr)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_create_res_inst(&path);
-}
-
 int lwm2m_delete_res_inst(const struct lwm2m_obj_path *path)
 {
 	int ret;
@@ -1666,19 +1256,6 @@ int lwm2m_delete_res_inst(const struct lwm2m_obj_path *path)
 	k_mutex_unlock(&registry_lock);
 	return 0;
 }
-
-int lwm2m_engine_delete_res_inst(const char *pathstr)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_delete_res_inst(&path);
-}
 /* Register callbacks */
 
 int lwm2m_register_read_callback(const struct lwm2m_obj_path *path, lwm2m_engine_get_data_cb_t cb)
@@ -1695,19 +1272,6 @@ int lwm2m_register_read_callback(const struct lwm2m_obj_path *path, lwm2m_engine
 	return 0;
 }
 
-int lwm2m_engine_register_read_callback(const char *pathstr, lwm2m_engine_get_data_cb_t cb)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_register_read_callback(&path, cb);
-}
-
 int lwm2m_register_pre_write_callback(const struct lwm2m_obj_path *path,
 				      lwm2m_engine_get_data_cb_t cb)
 {
@@ -1721,19 +1285,6 @@ int lwm2m_register_pre_write_callback(const struct lwm2m_obj_path *path,
 
 	res->pre_write_cb = cb;
 	return 0;
-}
-
-int lwm2m_engine_register_pre_write_callback(const char *pathstr, lwm2m_engine_get_data_cb_t cb)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_register_pre_write_callback(&path, cb);
 }
 
 int lwm2m_register_validate_callback(const struct lwm2m_obj_path *path,
@@ -1761,29 +1312,6 @@ int lwm2m_register_validate_callback(const struct lwm2m_obj_path *path,
 #endif /* CONFIG_LWM2M_ENGINE_VALIDATION_BUFFER_SIZE > 0 */
 }
 
-int lwm2m_engine_register_validate_callback(const char *pathstr, lwm2m_engine_set_data_cb_t cb)
-{
-#if CONFIG_LWM2M_ENGINE_VALIDATION_BUFFER_SIZE > 0
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_register_validate_callback(&path, cb);
-#else
-	ARG_UNUSED(pathstr);
-	ARG_UNUSED(cb);
-
-	LOG_ERR("Validation disabled. Set "
-		"CONFIG_LWM2M_ENGINE_VALIDATION_BUFFER_SIZE > 0 to "
-		"enable validation support.");
-	return -ENOTSUP;
-#endif /* CONFIG_LWM2M_ENGINE_VALIDATION_BUFFER_SIZE > 0 */
-}
-
 int lwm2m_register_post_write_callback(const struct lwm2m_obj_path *path,
 				       lwm2m_engine_set_data_cb_t cb)
 {
@@ -1797,19 +1325,6 @@ int lwm2m_register_post_write_callback(const struct lwm2m_obj_path *path,
 
 	res->post_write_cb = cb;
 	return 0;
-}
-
-int lwm2m_engine_register_post_write_callback(const char *pathstr, lwm2m_engine_set_data_cb_t cb)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_register_post_write_callback(&path, cb);
 }
 
 int lwm2m_register_exec_callback(const struct lwm2m_obj_path *path, lwm2m_engine_execute_cb_t cb)
@@ -1826,19 +1341,6 @@ int lwm2m_register_exec_callback(const struct lwm2m_obj_path *path, lwm2m_engine
 	return 0;
 }
 
-int lwm2m_engine_register_exec_callback(const char *pathstr, lwm2m_engine_execute_cb_t cb)
-{
-	int ret;
-	struct lwm2m_obj_path path;
-
-	ret = lwm2m_string_to_path(pathstr, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	return lwm2m_register_exec_callback(&path, cb);
-}
-
 int lwm2m_register_create_callback(uint16_t obj_id, lwm2m_engine_user_cb_t cb)
 {
 	struct lwm2m_engine_obj *obj = NULL;
@@ -1853,11 +1355,6 @@ int lwm2m_register_create_callback(uint16_t obj_id, lwm2m_engine_user_cb_t cb)
 	return 0;
 }
 
-int lwm2m_engine_register_create_callback(uint16_t obj_id, lwm2m_engine_user_cb_t cb)
-{
-	return lwm2m_register_create_callback(obj_id, cb);
-}
-
 int lwm2m_register_delete_callback(uint16_t obj_id, lwm2m_engine_user_cb_t cb)
 {
 	struct lwm2m_engine_obj *obj = NULL;
@@ -1870,11 +1367,6 @@ int lwm2m_register_delete_callback(uint16_t obj_id, lwm2m_engine_user_cb_t cb)
 
 	obj->user_delete_cb = cb;
 	return 0;
-}
-
-int lwm2m_engine_register_delete_callback(uint16_t obj_id, lwm2m_engine_user_cb_t cb)
-{
-	return lwm2m_register_delete_callback(obj_id, cb);
 }
 /* Generic data handlers */
 
@@ -1943,12 +1435,26 @@ struct lwm2m_engine_res_inst *lwm2m_engine_get_res_inst(const struct lwm2m_obj_p
 
 bool lwm2m_engine_shall_report_obj_version(const struct lwm2m_engine_obj *obj)
 {
-	if (obj->is_core) {
-		return obj->version_major != LWM2M_PROTOCOL_VERSION_MAJOR ||
-		       obj->version_minor != LWM2M_PROTOCOL_VERSION_MINOR;
+	if (IS_ENABLED(CONFIG_LWM2M_ENGINE_ALWAYS_REPORT_OBJ_VERSION)) {
+		return true;
 	}
 
-	return obj->version_major != 1 || obj->version_minor != 0;
+	/* For non-core objects, report version other than 1.0 */
+	if (!obj->is_core) {
+		return obj->version_major != 1 || obj->version_minor != 0;
+	}
+
+	/* For core objects, report version based on default version array. */
+	for (size_t i = 0; i < ARRAY_SIZE(default_obj_versions); i++) {
+		if (obj->obj_id != default_obj_versions[i].obj_id) {
+			continue;
+		}
+
+		return obj->version_major != default_obj_versions[i].version_major ||
+		       obj->version_minor != default_obj_versions[i].version_minor;
+	}
+
+	return true;
 }
 
 #if defined(CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT)
@@ -2131,35 +1637,9 @@ int lwm2m_enable_cache(const struct lwm2m_obj_path *path, struct lwm2m_time_seri
 #endif /* CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT */
 }
 
-int lwm2m_engine_enable_cache(const char *resource_path, struct lwm2m_time_series_elem *data_cache,
-			    size_t cache_len)
-{
 #if defined(CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT)
-	struct lwm2m_obj_path path;
-	int ret;
-
-	/* translate path -> path_obj */
-	ret = lwm2m_string_to_path(resource_path, &path, '/');
-	if (ret < 0) {
-		return ret;
-	}
-
-	if (path.level < LWM2M_PATH_LEVEL_RESOURCE) {
-		LOG_ERR("path must have at least 3 parts");
-		return -EINVAL;
-	}
-
-	return lwm2m_enable_cache(&path, data_cache, cache_len);
-#else
-	LOG_ERR("LwM2M resource cache is only supported for "
-		"CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT");
-	return -ENOTSUP;
-#endif /* CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT */
-}
-
-int lwm2m_engine_data_cache_init(void)
+static int lwm2m_engine_data_cache_init(void)
 {
-#if defined(CONFIG_LWM2M_RESOURCE_DATA_CACHE_SUPPORT)
 	int i;
 
 	sys_slist_init(&lwm2m_timed_cache_list);
@@ -2167,9 +1647,10 @@ int lwm2m_engine_data_cache_init(void)
 	for (i = 0; i < ARRAY_SIZE(lwm2m_cache_entries); i++) {
 		lwm2m_cache_entries[i].path.level = LWM2M_PATH_LEVEL_NONE;
 	}
-#endif
 	return 0;
 }
+LWM2M_ENGINE_INIT(lwm2m_engine_data_cache_init);
+#endif
 
 bool lwm2m_cache_write(struct lwm2m_time_series_resource *cache_entry,
 		       struct lwm2m_time_series_elem *buf)
@@ -2253,4 +1734,23 @@ size_t lwm2m_cache_size(const struct lwm2m_time_series_resource *cache_entry)
 #else
 	return 0;
 #endif
+}
+
+int lwm2m_set_bulk(const struct lwm2m_res_item res_list[], size_t res_list_size)
+{
+	int ret;
+
+	k_mutex_lock(&registry_lock, K_FOREVER);
+	for (int i = 0; i < res_list_size; i++) {
+
+		ret = lwm2m_engine_set(res_list[i].path, res_list[i].value, res_list[i].size);
+
+		if (ret) {
+			k_mutex_unlock(&registry_lock);
+			return ret;
+		}
+	}
+	k_mutex_unlock(&registry_lock);
+
+	return 0;
 }

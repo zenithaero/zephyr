@@ -9,38 +9,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <stdlib.h>
-#include <ctype.h>
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <zephyr/autoconf.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/audio/tbs.h>
 #include <zephyr/kernel.h>
-#include <zephyr/types.h>
+#include <zephyr/shell/shell_string_conv.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/types.h>
 
-#include <zephyr/bluetooth/conn.h>
-#include <zephyr/bluetooth/gatt.h>
-#include <zephyr/bluetooth/audio/tbs.h>
-
-#include "shell/bt.h"
+#include "host/shell/bt.h"
 
 static int cmd_tbs_client_discover(const struct shell *sh, size_t argc,
 				   char *argv[])
 {
-	bool subscribe = true;
 	int result = 0;
 
-	if (argc > 1) {
-		subscribe = shell_strtobool(argv[1], 0, &result);
-		if (result != 0) {
-			shell_error(sh, "Could not parse subscribe: %d",
-				    result);
-
-			return -ENOEXEC;
-		}
-	}
-
-	result = bt_tbs_client_discover(default_conn, (bool)subscribe);
+	result = bt_tbs_client_discover(default_conn);
 	if (result != 0) {
 		shell_print(sh, "Fail: %d", result);
 	}
@@ -1001,8 +994,8 @@ static int cmd_tbs_client(const struct shell *sh, size_t argc, char **argv)
 
 SHELL_STATIC_SUBCMD_SET_CREATE(tbs_client_cmds,
 	SHELL_CMD_ARG(discover, NULL,
-		      "Discover TBS [subscribe]",
-		      cmd_tbs_client_discover, 1, 1),
+		      "Discover TBS",
+		      cmd_tbs_client_discover, 1, 0),
 
 #if defined(CONFIG_BT_TBS_CLIENT_SET_BEARER_SIGNAL_INTERVAL)
 	SHELL_CMD_ARG(set_signal_reporting_interval, NULL,

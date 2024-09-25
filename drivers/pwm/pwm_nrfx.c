@@ -10,10 +10,27 @@
 #include <soc.h>
 #include <hal/nrf_gpio.h>
 #include <stdbool.h>
+#include <zephyr/linker/devicetree_regions.h>
 
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(pwm_nrfx, CONFIG_PWM_LOG_LEVEL);
+
+/* NRFX_PWM_NRF52_ANOMALY_109_WORKAROUND_ENABLED can be undefined or defined
+ * to 0 or 1, hence the use of #if IS_ENABLED().
+ */
+#if IS_ENABLED(NRFX_PWM_NRF52_ANOMALY_109_WORKAROUND_ENABLED)
+#define ANOMALY_109_IRQ_CONNECT(...) IRQ_CONNECT(__VA_ARGS__)
+#define ANOMALY_109_EGU_IRQ_CONNECT(idx) _EGU_IRQ_CONNECT(idx)
+#define _EGU_IRQ_CONNECT(idx) \
+	extern void nrfx_egu_##idx##_irq_handler(void); \
+	IRQ_CONNECT(DT_IRQN(DT_NODELABEL(egu##idx)), \
+		    DT_IRQ(DT_NODELABEL(egu##idx), priority), \
+		    nrfx_isr, nrfx_egu_##idx##_irq_handler, 0)
+#else
+#define ANOMALY_109_IRQ_CONNECT(...)
+#define ANOMALY_109_EGU_IRQ_CONNECT(idx)
+#endif
 
 #define PWM_NRFX_CH_POLARITY_MASK BIT(15)
 #define PWM_NRFX_CH_COMPARE_MASK  BIT_MASK(15)
@@ -29,7 +46,6 @@ struct pwm_nrfx_config {
 
 struct pwm_nrfx_data {
 	uint32_t period_cycles;
-	uint16_t seq_values[NRF_PWM_CHANNEL_COUNT];
 	/* Bit mask indicating channels that need the PWM generation. */
 	uint8_t  pwm_needed;
 	uint8_t  prescaler;
@@ -40,6 +56,12 @@ struct pwm_nrfx_data {
 #error "Current implementation supports maximum 8 channels."
 #endif
 
+static uint16_t *seq_values_ptr_get(const struct device *dev)
+{
+	const struct pwm_nrfx_config *config = dev->config;
+
+	return (uint16_t *)config->seq.values.p_raw;
+}
 
 static bool pwm_period_check_and_set(const struct device *dev,
 				     uint32_t channel, uint32_t period_cycles)
@@ -148,7 +170,7 @@ static int pwm_nrfx_set_cycles(const struct device *dev, uint32_t channel,
 		needs_pwm = true;
 	}
 
-	data->seq_values[channel] = PWM_NRFX_CH_VALUE(compare_value, inverted);
+	seq_values_ptr_get(dev)[channel] = PWM_NRFX_CH_VALUE(compare_value, inverted);
 
 	LOG_DBG("channel %u, pulse %u, period %u, prescaler: %u.",
 		channel, pulse_cycles, period_cycles, data->prescaler);
@@ -198,13 +220,7 @@ static int pwm_nrfx_set_cycles(const struct device *dev, uint32_t channel,
 			 * and till that moment, it ignores any start requests,
 			 * so ensure here that it is stopped.
 			 */
-			/* TODO: Remove nrfy_pwm_events_process() that is temporarly
-			 * added as a workaround for missing functionality in
-			 * nrfx_pwm_stopped_check()
-			 */
-			while (!nrfx_pwm_stopped_check(&config->pwm) &&
-			       !nrfy_pwm_events_process(config->pwm.p_reg,
-					NRFY_EVENT_TO_INT_BITMASK(NRF_PWM_EVENT_STOPPED))) {
+			while (!nrfx_pwm_stopped_check(&config->pwm)) {
 			}
 		}
 
@@ -239,16 +255,17 @@ static const struct pwm_driver_api pwm_nrfx_drv_api_funcs = {
 static int pwm_nrfx_init(const struct device *dev)
 {
 	const struct pwm_nrfx_config *config = dev->config;
-	struct pwm_nrfx_data *data = dev->data;
 	uint8_t initially_inverted = 0;
 
 	int ret = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+
+	ANOMALY_109_EGU_IRQ_CONNECT(NRFX_PWM_NRF52_ANOMALY_109_EGU_INSTANCE);
 
 	if (ret < 0) {
 		return ret;
 	}
 
-	for (size_t i = 0; i < ARRAY_SIZE(data->seq_values); i++) {
+	for (size_t i = 0; i < NRF_PWM_CHANNEL_COUNT; i++) {
 		uint32_t psel;
 
 		if (channel_psel_get(i, &psel, config)) {
@@ -261,10 +278,10 @@ static int pwm_nrfx_init(const struct device *dev)
 		}
 	}
 
-	for (size_t i = 0; i < ARRAY_SIZE(data->seq_values); i++) {
+	for (size_t i = 0; i < NRF_PWM_CHANNEL_COUNT; i++) {
 		bool inverted = initially_inverted & BIT(i);
 
-		data->seq_values[i] = PWM_NRFX_CH_VALUE(0, inverted);
+		seq_values_ptr_get(dev)[i] = PWM_NRFX_CH_VALUE(0, inverted);
 	}
 
 	nrfx_err_t result = nrfx_pwm_init(&config->pwm,
@@ -327,10 +344,19 @@ static int pwm_nrfx_pm_action(const struct device *dev,
 
 #define PWM(dev_idx) DT_NODELABEL(pwm##dev_idx)
 #define PWM_PROP(dev_idx, prop) DT_PROP(PWM(dev_idx), prop)
+#define PWM_HAS_PROP(idx, prop) DT_NODE_HAS_PROP(PWM(idx), prop)
+
+#define PWM_MEMORY_SECTION(idx)						      \
+	COND_CODE_1(PWM_HAS_PROP(idx, memory_regions),			      \
+		(__attribute__((__section__(LINKER_DT_NODE_REGION_NAME(	      \
+			DT_PHANDLE(PWM(idx), memory_regions)))))),	      \
+		())
 
 #define PWM_NRFX_DEVICE(idx)						      \
 	NRF_DT_CHECK_NODE_HAS_PINCTRL_SLEEP(PWM(idx));			      \
 	static struct pwm_nrfx_data pwm_nrfx_##idx##_data;		      \
+	static uint16_t pwm_##idx##_seq_values[NRF_PWM_CHANNEL_COUNT]	      \
+			PWM_MEMORY_SECTION(idx);			      \
 	PINCTRL_DT_DEFINE(PWM(idx));					      \
 	static const struct pwm_nrfx_config pwm_nrfx_##idx##_config = {	      \
 		.pwm = NRFX_PWM_INSTANCE(idx),				      \
@@ -345,30 +371,69 @@ static int pwm_nrfx_pm_action(const struct device *dev,
 			.load_mode = NRF_PWM_LOAD_INDIVIDUAL,		      \
 			.step_mode = NRF_PWM_STEP_TRIGGERED,		      \
 		},							      \
-		.seq.values.p_raw = pwm_nrfx_##idx##_data.seq_values,	      \
+		.seq.values.p_raw = pwm_##idx##_seq_values,		      \
 		.seq.length = NRF_PWM_CHANNEL_COUNT,			      \
 		.pcfg = PINCTRL_DT_DEV_CONFIG_GET(PWM(idx)),		      \
 	};								      \
+	static int pwm_nrfx_init##idx(const struct device *dev)		      \
+	{								      \
+		ANOMALY_109_IRQ_CONNECT(				      \
+			DT_IRQN(PWM(idx)), DT_IRQ(PWM(idx), priority),	      \
+			nrfx_isr, nrfx_pwm_##idx##_irq_handler, 0);	      \
+		return pwm_nrfx_init(dev);				      \
+	};								      \
 	PM_DEVICE_DT_DEFINE(PWM(idx), pwm_nrfx_pm_action);		      \
 	DEVICE_DT_DEFINE(PWM(idx),					      \
-			 pwm_nrfx_init, PM_DEVICE_DT_GET(PWM(idx)),	      \
+			 pwm_nrfx_init##idx, PM_DEVICE_DT_GET(PWM(idx)),      \
 			 &pwm_nrfx_##idx##_data,			      \
 			 &pwm_nrfx_##idx##_config,			      \
 			 POST_KERNEL, CONFIG_PWM_INIT_PRIORITY,		      \
 			 &pwm_nrfx_drv_api_funcs)
 
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(pwm0), okay)
+#ifdef CONFIG_HAS_HW_NRF_PWM0
 PWM_NRFX_DEVICE(0);
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(pwm1), okay)
+#ifdef CONFIG_HAS_HW_NRF_PWM1
 PWM_NRFX_DEVICE(1);
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(pwm2), okay)
+#ifdef CONFIG_HAS_HW_NRF_PWM2
 PWM_NRFX_DEVICE(2);
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_NODELABEL(pwm3), okay)
+#ifdef CONFIG_HAS_HW_NRF_PWM3
 PWM_NRFX_DEVICE(3);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM20
+PWM_NRFX_DEVICE(20);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM21
+PWM_NRFX_DEVICE(21);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM22
+PWM_NRFX_DEVICE(22);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM120
+PWM_NRFX_DEVICE(120);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM130
+PWM_NRFX_DEVICE(130);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM131
+PWM_NRFX_DEVICE(131);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM132
+PWM_NRFX_DEVICE(132);
+#endif
+
+#ifdef CONFIG_HAS_HW_NRF_PWM133
+PWM_NRFX_DEVICE(133);
 #endif

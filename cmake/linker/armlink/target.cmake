@@ -6,17 +6,11 @@ find_program(CMAKE_LINKER ${CROSS_COMPILE}armlink PATHS ${TOOLCHAIN_HOME} NO_DEF
 
 add_custom_target(armlink)
 
-macro(toolchain_ld_base)
-endmacro()
-
 function(toolchain_ld_force_undefined_symbols)
   foreach(symbol ${ARGN})
     zephyr_link_libraries(--undefined=${symbol})
   endforeach()
 endfunction()
-
-macro(toolchain_ld_baremetal)
-endmacro()
 
 macro(configure_linker_script linker_script_gen linker_pass_define)
   set(STEERING_FILE)
@@ -65,7 +59,7 @@ function(toolchain_ld_link_elf)
   )
 
   foreach(lib ${ZEPHYR_LIBS_PROPERTY})
-    if(NOT ${lib} STREQUAL arch__arm__core__aarch32__cortex_m)
+    if(NOT ${lib} STREQUAL arch__arm__core__cortex_m)
       list(APPEND ZEPHYR_LIBS_OBJECTS $<TARGET_OBJECTS:${lib}>)
       list(APPEND ZEPHYR_LIBS_OBJECTS $<TARGET_PROPERTY:${lib},LINK_LIBRARIES>)
     endif()
@@ -76,7 +70,7 @@ function(toolchain_ld_link_elf)
     ${TOOLCHAIN_LD_LINK_ELF_LIBRARIES_PRE_SCRIPT}
     --scatter=${TOOLCHAIN_LD_LINK_ELF_LINKER_SCRIPT}
     ${TOOLCHAIN_LD_LINK_ELF_LIBRARIES_POST_SCRIPT}
-    $<TARGET_OBJECTS:arch__arm__core__aarch32__cortex_m>
+    $<TARGET_OBJECTS:arch__arm__core__cortex_m>
     --map --list=${TOOLCHAIN_LD_LINK_ELF_OUTPUT_MAP}
     ${ZEPHYR_LIBS_OBJECTS}
     kernel
@@ -114,6 +108,5 @@ function(toolchain_ld_link_elf)
   )
 endfunction(toolchain_ld_link_elf)
 
-include(${ZEPHYR_BASE}/cmake/linker/ld/target_cpp.cmake)
 include(${ZEPHYR_BASE}/cmake/linker/ld/target_relocation.cmake)
 include(${ZEPHYR_BASE}/cmake/linker/ld/target_configure.cmake)

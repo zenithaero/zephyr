@@ -145,9 +145,10 @@ In most situations, the states defined in Devicetree will be the ones used in
 the compiled firmware. However, there are some cases where certain states will
 be conditionally used depending on a compilation flag. A typical case is the
 ``sleep`` state. This state is only used in practice if
-:kconfig:option:`CONFIG_PM_DEVICE` is enabled. If a firmware variant without device
-power management is needed, one should in theory remove the ``sleep`` state from
-Devicetree to not waste ROM space storing such unused state.
+:kconfig:option:`CONFIG_PM` or :kconfig:option:`CONFIG_PM_DEVICE` is enabled.
+If a firmware variant without these power management configurations is needed,
+one should in theory remove the ``sleep`` state from Devicetree to not waste ROM
+space storing such unused state.
 
 States can be skipped by the ``pinctrl`` Devicetree macros if a definition named
 ``PINCTRL_SKIP_{STATE_NAME}`` expanding to ``1`` is present when pin control
@@ -157,8 +158,8 @@ management:
 
 .. code-block:: c
 
-    #ifndef CONFIG_PM_DEVICE
-    /** If device power management is not enabled, "sleep" state will be ignored. */
+    #if !defined(CONFIG_PM) && !defined(CONFIG_PM_DEVICE)
+    /** Out of power management configurations, ignore "sleep" state. */
     #define PINCTRL_SKIP_SLEEP 1
     #endif
 
@@ -502,4 +503,4 @@ Dynamic pin control
 Other reference material
 ************************
 
-- `Introduction to pin muxing and GPIO control under Linux <https://static.sched.com/hosted_files/osselc21/b6/ELC-2021_Introduction_to_pin_muxing_and_GPIO_control_under_Linux.pdf>`_
+- `Introduction to pin muxing and GPIO control under Linux <https://elinux.org/images/a/a7/ELC-2021_Introduction_to_pin_muxing_and_GPIO_control_under_Linux.pdf>`_

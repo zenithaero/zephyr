@@ -5,12 +5,15 @@
 '''Runner for debugging with J-Link.'''
 
 import argparse
+import ipaddress
 import logging
 import os
 from pathlib import Path
 import shlex
 import subprocess
 import sys
+import socket
+import time
 import tempfile
 
 from runners.core import ZephyrBinaryRunner, RunnerCaps, FileType
@@ -24,6 +27,14 @@ except ImportError:
 
 DEFAULT_JLINK_EXE = 'JLink.exe' if sys.platform == 'win32' else 'JLinkExe'
 DEFAULT_JLINK_GDB_PORT = 2331
+DEFAULT_JLINK_RTT_PORT = 19021
+
+def is_ip(ip):
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return True
 
 class ToggleAction(argparse.Action):
 
@@ -35,12 +46,13 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
 
     def __init__(self, cfg, device, dev_id=None,
                  commander=DEFAULT_JLINK_EXE,
-                 dt_flash=True, erase=True, reset_after_load=False,
+                 dt_flash=True, erase=True, reset=False,
                  iface='swd', speed='auto',
                  loader=None,
                  gdbserver='JLinkGDBServer',
                  gdb_host='',
                  gdb_port=DEFAULT_JLINK_GDB_PORT,
+                 rtt_port=DEFAULT_JLINK_RTT_PORT,
                  tui=False, tool_opt=[]):
         super().__init__(cfg)
         self.file = cfg.file
@@ -54,7 +66,7 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
         self.commander = commander
         self.dt_flash = dt_flash
         self.erase = erase
-        self.reset_after_load = reset_after_load
+        self.reset = reset
         self.gdbserver = gdbserver
         self.iface = iface
         self.speed = speed
@@ -62,6 +74,7 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
         self.gdb_port = gdb_port
         self.tui_arg = ['-tui'] if tui else []
         self.loader = loader
+        self.rtt_port = rtt_port
 
         self.tool_opt = []
         for opts in [shlex.split(opt) for opt in tool_opt]:
@@ -73,14 +86,15 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
 
     @classmethod
     def capabilities(cls):
-        return RunnerCaps(commands={'flash', 'debug', 'debugserver', 'attach'},
-                          dev_id=True, flash_addr=True, erase=True,
-                          tool_opt=True, file=True)
+        return RunnerCaps(commands={'flash', 'debug', 'debugserver', 'attach', 'rtt'},
+                          dev_id=True, flash_addr=True, erase=True, reset=True,
+                          tool_opt=True, file=True, rtt=True)
 
     @classmethod
     def dev_id_help(cls) -> str:
         return '''Device identifier. Use it to select the J-Link Serial Number
-                  of the device connected over USB.'''
+                  of the device connected over USB. If the J-Link is connected over ip,
+                  the Device identifier is the ip.'''
 
     @classmethod
     def tool_opt_help(cls) -> str:
@@ -114,11 +128,15 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                             help=f'''J-Link Commander, default is
                             {DEFAULT_JLINK_EXE}''')
         parser.add_argument('--reset-after-load', '--no-reset-after-load',
-                            dest='reset_after_load', nargs=0,
+                            dest='reset', nargs=0,
                             action=ToggleAction,
-                            help='reset after loading? (default: no)')
+                            help='obsolete synonym for --reset/--no-reset')
+        parser.add_argument('--rtt-client', default='JLinkRTTClient',
+                            help='RTT client, default is JLinkRTTClient')
+        parser.add_argument('--rtt-port', default=DEFAULT_JLINK_RTT_PORT,
+                            help=f'jlink rtt port, defaults to {DEFAULT_JLINK_RTT_PORT}')
 
-        parser.set_defaults(reset_after_load=False)
+        parser.set_defaults(reset=False)
 
     @classmethod
     def do_create(cls, cfg, args):
@@ -127,12 +145,13 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                                  commander=args.commander,
                                  dt_flash=args.dt_flash,
                                  erase=args.erase,
-                                 reset_after_load=args.reset_after_load,
+                                 reset=args.reset,
                                  iface=args.iface, speed=args.speed,
                                  gdbserver=args.gdbserver,
                                  loader=args.loader,
                                  gdb_host=args.gdb_host,
                                  gdb_port=args.gdb_port,
+                                 rtt_port=args.rtt_port,
                                  tui=args.tui, tool_opt=args.tool_opt)
 
     def print_gdbserver_message(self):
@@ -224,19 +243,22 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
         rtos = self.thread_info_enabled and self.supports_thread_info
         plugin_dir = os.fspath(Path(self.commander).parent / 'GDBServer' /
                                'RTOSPlugin_Zephyr')
+        big_endian = self.build_conf.getboolean('CONFIG_BIG_ENDIAN')
 
         server_cmd = ([self.gdbserver] +
-                       # only USB connections supported
-                      ['-select', 'usb' + (f'={self.dev_id}'
-                                           if self.dev_id else ''),
+                      ['-select',
+                                           ('ip' if is_ip(self.dev_id) else 'usb') +
+                                           (f'={self.dev_id}' if self.dev_id else ''),
                        '-port', str(self.gdb_port),
                        '-if', self.iface,
                        '-speed', self.speed,
                        '-device', self.device,
                        '-silent',
+                       '-endian', 'big' if big_endian else 'little',
                        '-singlerun'] +
                       (['-nogui'] if self.supports_nogui else []) +
                       (['-rtos', plugin_dir] if rtos else []) +
+                      ['-rtttelnetport', str(self.rtt_port)] +
                       self.tool_opt)
 
         if command == 'flash':
@@ -247,6 +269,27 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
             self.require(self.gdbserver)
             self.print_gdbserver_message()
             self.check_call(server_cmd)
+        elif command == 'rtt':
+            self.print_gdbserver_message()
+            server_cmd += ['-nohalt']
+            server_proc = self.popen_ignore_int(server_cmd)
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                # wait for the port to be open
+                while server_proc.poll() is None:
+                    try:
+                        sock.connect(('localhost', self.rtt_port))
+                        break
+                    except ConnectionRefusedError:
+                        time.sleep(0.1)
+                sock.shutdown(socket.SHUT_RDWR)
+                time.sleep(0.1)
+                self.run_telnet_client('localhost', self.rtt_port)
+            except Exception as e:
+                self.logger.error(e)
+            finally:
+                server_proc.terminate()
+                server_proc.wait()
         else:
             if self.gdb_cmd is None:
                 raise ValueError('Cannot debug; gdb is missing')
@@ -266,7 +309,7 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                 client_cmd += ['-ex', 'monitor halt',
                                '-ex', 'monitor reset',
                                '-ex', 'load']
-                if self.reset_after_load:
+                if self.reset:
                     client_cmd += ['-ex', 'monitor reset']
             if not self.gdb_host:
                 self.require(self.gdbserver)
@@ -281,6 +324,7 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
         lines = [
             'ExitOnError 1',  # Treat any command-error as fatal
             'r',  # Reset and halt the target
+            'BE' if self.build_conf.getboolean('CONFIG_BIG_ENDIAN') else 'LE'
         ]
 
         if self.erase:
@@ -308,10 +352,12 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                 raise ValueError(err)
 
         else:
-            # use hex or bin file provided by the buildsystem, preferring .hex over .bin
+            # Use hex, bin or elf file provided by the buildsystem.
+            # Preferring .hex over .bin and .elf
             if self.hex_name is not None and os.path.isfile(self.hex_name):
                 flash_file = self.hex_name
                 flash_cmd = f'loadfile "{self.hex_name}"'
+            # Preferring .bin over .elf
             elif self.bin_name is not None and os.path.isfile(self.bin_name):
                 if self.dt_flash:
                     flash_addr = self.flash_address_from_build_conf(self.build_conf)
@@ -319,14 +365,17 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                     flash_addr = 0
                 flash_file = self.bin_name
                 flash_cmd = f'loadfile "{self.bin_name}" 0x{flash_addr:x}'
+            elif self.elf_name is not None and os.path.isfile(self.elf_name):
+                flash_file = self.elf_name
+                flash_cmd = f'loadfile "{self.elf_name}"'
             else:
-                err = 'Cannot flash; no hex ({}) or bin ({}) files found.'
-                raise ValueError(err.format(self.hex_name, self.bin_name))
+                err = 'Cannot flash; no hex ({}), bin ({}) or elf ({}) files found.'
+                raise ValueError(err.format(self.hex_name, self.bin_name, self.elf_name))
 
         # Flash the selected build artifact
         lines.append(flash_cmd)
 
-        if self.reset_after_load:
+        if self.reset:
             lines.append('r') # Reset and halt the target
 
         lines.append('g') # Start the CPU
@@ -355,8 +404,7 @@ class JLinkBinaryRunner(ZephyrBinaryRunner):
                 loader_details = "?" + self.loader
 
             cmd = ([self.commander] +
-                    # only USB connections supported
-                   (['-USB', f'{self.dev_id}'] if self.dev_id else []) +
+                   (['-IP', f'{self.dev_id}'] if is_ip(self.dev_id) else (['-USB', f'{self.dev_id}'] if self.dev_id else [])) +
                    (['-nogui', '1'] if self.supports_nogui else []) +
                    ['-if', self.iface,
                     '-speed', self.speed,

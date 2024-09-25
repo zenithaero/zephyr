@@ -56,7 +56,6 @@ class SizeCalculator:
         "ccm_data",
         "usb_descriptor",
         "usb_data", "usb_bos_desc",
-        "uart_mux",
         'log_backends_sections',
         'log_dynamic_sections',
         'log_const_sections',
@@ -78,7 +77,7 @@ class SizeCalculator:
         "ctors",
         "init_array",
         "reset",
-        "z_object_assignment_area",
+        "k_object_assignment_area",
         "rodata",
         "net_l2",
         "vector",
@@ -257,9 +256,9 @@ class SizeCalculator:
             # If build.log file exists, check errors (unrecognized sections
             # in ELF file).
             if self.buildlog_filename:
-                if name in SizeCalculator.alloc_sections or\
-                    SizeCalculator.rw_sections or\
-                    SizeCalculator.ro_sections:
+                if name in SizeCalculator.alloc_sections or \
+                   name in SizeCalculator.rw_sections or \
+                   name in SizeCalculator.ro_sections:
                     continue
                 else:
                     stype = "unknown"

@@ -16,10 +16,10 @@
 
 #define read_sysreg(reg)						\
 ({									\
-	uint64_t val;							\
+	uint64_t reg_val;						\
 	__asm__ volatile ("mrs %0, " STRINGIFY(reg)			\
-			  : "=r" (val) :: "memory");			\
-	val;								\
+			  : "=r" (reg_val) :: "memory");		\
+	reg_val;							\
 })
 
 #define write_sysreg(val, reg)						\
@@ -70,8 +70,10 @@ MAKE_REG_HELPER(hcr_el2);
 MAKE_REG_HELPER(id_aa64pfr0_el1);
 MAKE_REG_HELPER(id_aa64mmfr0_el1);
 MAKE_REG_HELPER(mpidr_el1);
-MAKE_REG_HELPER(par_el1)
+MAKE_REG_HELPER(par_el1);
+#if !defined(CONFIG_ARMV8_R)
 MAKE_REG_HELPER(scr_el3);
+#endif /* CONFIG_ARMV8_R */
 MAKE_REG_HELPER(tpidrro_el0);
 MAKE_REG_HELPER(vmpidr_el2);
 MAKE_REG_HELPER(sp_el0);

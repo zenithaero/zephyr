@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/spi/rtio.h>
 #include <zephyr/drivers/clock_control.h>
 #include <fsl_dspi.h>
 #include <zephyr/drivers/pinctrl.h>
@@ -195,11 +196,11 @@ static int spi_mcux_transfer_next_packet(const struct device *dev)
 
 	status = DSPI_MasterTransferNonBlocking(base, &data->handle, &transfer);
 	if (status != kStatus_Success) {
-		LOG_ERR("Transfer could not start");
+		LOG_ERR("Transfer could not start on %s: %d", dev->name, status);
+		return status == kDSPI_Busy ? -EBUSY : -EINVAL;
 	}
 
-	return status == kStatus_Success ? 0 :
-	       status == kDSPI_Busy ? -EBUSY : -EINVAL;
+	return 0;
 }
 
 static void spi_mcux_isr(const struct device *dev)
@@ -799,6 +800,9 @@ static const struct spi_driver_api spi_mcux_driver_api = {
 #ifdef CONFIG_SPI_ASYNC
 	.transceive_async = spi_mcux_transceive_async,
 #endif
+#ifdef CONFIG_SPI_RTIO
+	.iodev_submit = spi_rtio_iodev_default_submit,
+#endif
 	.release = spi_mcux_release,
 };
 
@@ -836,7 +840,7 @@ static const struct spi_driver_api spi_mcux_driver_api = {
 			.dest_data_size = 4,				\
 			.dma_callback = dma_callback,			\
 			.complete_callback_en = 1,			\
-			.error_callback_en = 1,				\
+			.error_callback_dis = 0,			\
 			.block_count = 1,				\
 			.head_block = &spi_mcux_data_##id.tx_dma_block,	\
 			.channel_direction = MEMORY_TO_PERIPHERAL,	\
@@ -857,7 +861,7 @@ static const struct spi_driver_api spi_mcux_driver_api = {
 			.dest_data_size = 2,				\
 			.dma_callback = dma_callback,			\
 			.complete_callback_en = 1,			\
-			.error_callback_en = 1,				\
+			.error_callback_dis = 0,			\
 			.block_count =					\
 			_UTIL_AND2(DT_INST_NODE_HAS_PROP(		\
 				id, nxp_rx_tx_chn_share), 2),		\
@@ -913,7 +917,7 @@ static const struct spi_driver_api spi_mcux_driver_api = {
 		.pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(id),		\
 	};								\
 	DEVICE_DT_INST_DEFINE(id,					\
-			    &spi_mcux_init,				\
+			    spi_mcux_init,				\
 			    NULL,					\
 			    &spi_mcux_data_##id,			\
 			    &spi_mcux_config_##id,			\

@@ -39,14 +39,26 @@ LOG_MODULE_REGISTER(coredump, CONFIG_KERNEL_LOG_LEVEL);
 
 #else
 
+/* Note that currently external memories are not supported */
 #define FLASH_CONTROLLER	\
 	DT_PARENT(DT_PARENT(DT_NODELABEL(FLASH_PARTITION)))
 
 #define FLASH_WRITE_SIZE	DT_PROP(FLASH_CONTROLLER, write_block_size)
-#define FLASH_BUF_SIZE		FLASH_WRITE_SIZE
-#define FLASH_ERASE_SIZE	DT_PROP(FLASH_CONTROLLER, erase_block_size)
+#define FLASH_BUF_SIZE \
+	MAX(FLASH_WRITE_SIZE, ROUND_UP(CONFIG_DEBUG_COREDUMP_FLASH_CHUNK_SIZE, FLASH_WRITE_SIZE))
+#if DT_NODE_HAS_PROP(FLASH_CONTROLLER, erase_block_size)
+#define DEVICE_ERASE_BLOCK_SIZE DT_PROP(FLASH_CONTROLLER, erase_block_size)
+#else
+/* Device has no erase block size */
+#define DEVICE_ERASE_BLOCK_SIZE 1
+#endif
+
+#define HEADER_SCRAMBLE_SIZE	ROUND_UP(sizeof(struct flash_hdr_t),	\
+					 DEVICE_ERASE_BLOCK_SIZE)
 
 #define HDR_VER			1
+
+#define FLASH_BACKEND_SEM_TIMEOUT (k_is_in_isr() ? K_NO_WAIT : K_FOREVER)
 
 typedef int (*data_read_cb_t)(void *arg, uint8_t *buf, size_t len);
 
@@ -104,7 +116,7 @@ static int partition_open(void)
 {
 	int ret;
 
-	(void)k_sem_take(&flash_sem, K_FOREVER);
+	(void)k_sem_take(&flash_sem, FLASH_BACKEND_SEM_TIMEOUT);
 
 	ret = flash_area_open(FLASH_PARTITION_ID, &backend_ctx.flash_area);
 	if (ret != 0) {
@@ -342,9 +354,9 @@ out:
 }
 
 /**
- * @brief Erase the stored coredump header from flash partition.
+ * @brief Erase or scramble the stored coredump header from flash partition.
  *
- * This erases the stored coredump header from the flash partition,
+ * This erases or scrambles the stored coredump header from the flash partition,
  * invalidating the coredump data.
  *
  * @return 0 if successful; error otherwise
@@ -355,10 +367,9 @@ static int erase_coredump_header(void)
 
 	ret = partition_open();
 	if (ret == 0) {
-		/* Erase header block */
-		ret = flash_area_erase(backend_ctx.flash_area, 0,
-				       ROUND_UP(sizeof(struct flash_hdr_t),
-						FLASH_ERASE_SIZE));
+		/* Erase or scramble header block */
+		ret = flash_area_flatten(backend_ctx.flash_area, 0,
+					 HEADER_SCRAMBLE_SIZE);
 	}
 
 	partition_close();
@@ -380,8 +391,8 @@ static int erase_flash_partition(void)
 	ret = partition_open();
 	if (ret == 0) {
 		/* Erase whole flash partition */
-		ret = flash_area_erase(backend_ctx.flash_area, 0,
-				       backend_ctx.flash_area->fa_size);
+		ret = flash_area_flatten(backend_ctx.flash_area, 0,
+					 backend_ctx.flash_area->fa_size);
 	}
 
 	partition_close();
@@ -404,8 +415,8 @@ static void coredump_flash_backend_start(void)
 
 	if (ret == 0) {
 		/* Erase whole flash partition */
-		ret = flash_area_erase(backend_ctx.flash_area, 0,
-				       backend_ctx.flash_area->fa_size);
+		ret = flash_area_flatten(backend_ctx.flash_area, 0,
+					 backend_ctx.flash_area->fa_size);
 	}
 
 	if (ret == 0) {
@@ -515,7 +526,7 @@ static void coredump_flash_backend_buffer_output(uint8_t *buf, size_t buflen)
 			copy_sz = remaining;
 		}
 
-		(void)memcpy(tmp_buf, ptr, copy_sz);
+		(void)memmove(tmp_buf, ptr, copy_sz);
 
 		for (i = 0; i < copy_sz; i++) {
 			backend_ctx.checksum += tmp_buf[i];
@@ -525,6 +536,7 @@ static void coredump_flash_backend_buffer_output(uint8_t *buf, size_t buflen)
 					&backend_ctx.stream_ctx,
 					tmp_buf, copy_sz, false);
 		if (backend_ctx.error != 0) {
+			LOG_ERR("Flash write error: %d", backend_ctx.error);
 			break;
 		}
 
@@ -617,7 +629,6 @@ struct coredump_backend_api coredump_backend_flash_partition = {
 	.query = coredump_flash_backend_query,
 	.cmd = coredump_flash_backend_cmd,
 };
-
 
 #ifdef CONFIG_DEBUG_COREDUMP_SHELL
 #include <zephyr/shell/shell.h>

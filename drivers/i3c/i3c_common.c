@@ -5,10 +5,12 @@
  */
 
 #include <string.h>
+#include <stdlib.h>
 
 #include <zephyr/toolchain.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/slist.h>
+#include <zephyr/sys/byteorder.h>
 
 #include <zephyr/drivers/i3c.h>
 
@@ -46,10 +48,10 @@ void i3c_addr_slots_set(struct i3c_addr_slots *slots,
 
 	bitpos = dev_addr * 2;
 	idx = bitpos / BITS_PER_LONG;
+	bitpos %= BITS_PER_LONG;
 
-	slots->slots[idx] &= ~((unsigned long)I3C_ADDR_SLOT_STATUS_MASK <<
-			       (bitpos % BITS_PER_LONG));
-	slots->slots[idx] |= status << (bitpos % BITS_PER_LONG);
+	slots->slots[idx] &= ~((unsigned long)I3C_ADDR_SLOT_STATUS_MASK << bitpos);
+	slots->slots[idx] |= status << bitpos;
 }
 
 enum i3c_addr_slot_status
@@ -72,8 +74,9 @@ i3c_addr_slots_status(struct i3c_addr_slots *slots,
 
 	bitpos = dev_addr * 2;
 	idx = bitpos / BITS_PER_LONG;
+	bitpos %= BITS_PER_LONG;
 
-	status = slots->slots[idx] >> (bitpos % BITS_PER_LONG);
+	status = slots->slots[idx] >> bitpos;
 	status &= I3C_ADDR_SLOT_STATUS_MASK;
 
 	return status;
@@ -96,6 +99,7 @@ int i3c_addr_slots_init(const struct device *dev)
 	sys_slist_init(&data->attached_dev.devices.i3c);
 	sys_slist_init(&data->attached_dev.devices.i2c);
 
+	/* Address restrictions (ref 5.1.2.2.5, Specification for I3C v1.1.1) */
 	for (i = 0; i <= 7; i++) {
 		/* Addresses 0 to 7 are reserved */
 		i3c_addr_slots_set(&data->attached_dev.addr_slots, i, I3C_ADDR_SLOT_STATUS_RSVD);
@@ -157,13 +161,13 @@ bool i3c_addr_slots_is_free(struct i3c_addr_slots *slots,
 	return (status == I3C_ADDR_SLOT_STATUS_FREE);
 }
 
-uint8_t i3c_addr_slots_next_free_find(struct i3c_addr_slots *slots)
+uint8_t i3c_addr_slots_next_free_find(struct i3c_addr_slots *slots, uint8_t start_addr)
 {
 	uint8_t addr;
 	enum i3c_addr_slot_status status;
 
 	/* Addresses 0 to 7 are reserved. So start at 8. */
-	for (addr = 8; addr < I3C_MAX_ADDR; addr++) {
+	for (addr = MAX(start_addr, 8); addr < I3C_MAX_ADDR; addr++) {
 		status = i3c_addr_slots_status(slots, addr);
 		if (status == I3C_ADDR_SLOT_STATUS_FREE) {
 			return addr;
@@ -194,17 +198,15 @@ struct i3c_device_desc *i3c_dev_list_find(const struct i3c_dev_list *dev_list,
 	return ret;
 }
 
-struct i3c_device_desc *i3c_dev_list_i3c_addr_find(struct i3c_dev_attached_list *dev_list,
+struct i3c_device_desc *i3c_dev_list_i3c_addr_find(const struct device *dev,
 						   uint8_t addr)
 {
-	sys_snode_t *node;
 	struct i3c_device_desc *ret = NULL;
+	struct i3c_device_desc *desc;
 
-	__ASSERT_NO_MSG(dev_list != NULL);
+	__ASSERT_NO_MSG(dev != NULL);
 
-	SYS_SLIST_FOR_EACH_NODE(&dev_list->devices.i3c, node) {
-		struct i3c_device_desc *desc = (void *)node;
-
+	I3C_BUS_FOR_EACH_I3CDEV(dev, desc) {
 		if (desc->dynamic_addr == addr) {
 			ret = desc;
 			break;
@@ -214,17 +216,15 @@ struct i3c_device_desc *i3c_dev_list_i3c_addr_find(struct i3c_dev_attached_list 
 	return ret;
 }
 
-struct i3c_i2c_device_desc *i3c_dev_list_i2c_addr_find(struct i3c_dev_attached_list *dev_list,
+struct i3c_i2c_device_desc *i3c_dev_list_i2c_addr_find(const struct device *dev,
 							   uint16_t addr)
 {
-	sys_snode_t *node;
 	struct i3c_i2c_device_desc *ret = NULL;
+	struct i3c_i2c_device_desc *desc;
 
-	__ASSERT_NO_MSG(dev_list != NULL);
+	__ASSERT_NO_MSG(dev != NULL);
 
-	SYS_SLIST_FOR_EACH_NODE(&dev_list->devices.i2c, node) {
-		struct i3c_i2c_device_desc *desc = (void *)node;
-
+	I3C_BUS_FOR_EACH_I2CDEV(dev, desc) {
 		if (desc->addr == addr) {
 			ret = desc;
 			break;
@@ -252,7 +252,7 @@ int i3c_determine_default_addr(struct i3c_device_desc *target, uint8_t *addr)
 				} else {
 					/* address is not free, get the next one */
 					*addr = i3c_addr_slots_next_free_find(
-						&data->attached_dev.addr_slots);
+						&data->attached_dev.addr_slots, 0);
 				}
 			} else {
 				/* Use the init dynamic address as it's DA, but the RR will need to
@@ -281,7 +281,7 @@ int i3c_determine_default_addr(struct i3c_device_desc *target, uint8_t *addr)
 			} else {
 				/* pick a DA to use */
 				*addr = i3c_addr_slots_next_free_find(
-					&data->attached_dev.addr_slots);
+					&data->attached_dev.addr_slots, 0);
 			}
 		}
 	} else {
@@ -454,7 +454,7 @@ int i3c_dev_list_daa_addr_helper(struct i3c_addr_slots *addr_slots,
 		goto out;
 	}
 
-	if (desc->dynamic_addr != 0U) {
+	if (desc != NULL && desc->dynamic_addr != 0U) {
 		if (assigned_okay) {
 			/* Return the already assigned address if desired so. */
 			dyn_addr = desc->dynamic_addr;
@@ -477,9 +477,8 @@ int i3c_dev_list_daa_addr_helper(struct i3c_addr_slots *addr_slots,
 	 * Use the desired dynamic address as the new dynamic address
 	 * if the slot is free.
 	 */
-	if (desc->init_dynamic_addr != 0U) {
-		if (i3c_addr_slots_is_free(addr_slots,
-					   desc->init_dynamic_addr)) {
+	if (desc != NULL && desc->init_dynamic_addr != 0U) {
+		if (i3c_addr_slots_is_free(addr_slots, desc->init_dynamic_addr)) {
 			dyn_addr = desc->init_dynamic_addr;
 			goto out;
 		}
@@ -488,7 +487,7 @@ int i3c_dev_list_daa_addr_helper(struct i3c_addr_slots *addr_slots,
 	/*
 	 * Find the next available address.
 	 */
-	dyn_addr = i3c_addr_slots_next_free_find(addr_slots);
+	dyn_addr = i3c_addr_slots_next_free_find(addr_slots, 0);
 
 	if (dyn_addr == 0U) {
 		/* No free addresses available */
@@ -513,6 +512,8 @@ int i3c_device_basic_info_get(struct i3c_device_desc *target)
 	struct i3c_ccc_getdcr dcr = {0};
 	struct i3c_ccc_mrl mrl = {0};
 	struct i3c_ccc_mwl mwl = {0};
+	union i3c_ccc_getcaps caps = {0};
+	union i3c_ccc_getmxds mxds = {0};
 
 	/*
 	 * Since some CCC functions requires BCR to function
@@ -548,6 +549,35 @@ int i3c_device_basic_info_get(struct i3c_device_desc *target)
 		LOG_DBG("No settable limit for GETMWL");
 	}
 
+	/* GETCAPS */
+	ret = i3c_ccc_do_getcaps_fmt1(target, &caps);
+	/*
+	 * GETCAPS (GETHDRCAP) is required to be supported for I3C v1.0 targets that support HDR
+	 * modes and required if the Target's I3C version is v1.1 or later, but which the version it
+	 * supports it can't be known ahead of time. So if the BCR bit for Advanced capabilities is
+	 * set, then it is expected for GETCAPS to always be supported. Otherwise, then it's a I3C
+	 * v1.0 device without any HDR modes so do not treat as an error if no valid response.
+	 */
+	if (ret == 0) {
+		memcpy(&target->getcaps, &caps, sizeof(target->getcaps));
+	} else if ((ret != 0) && (target->bcr & I3C_BCR_ADV_CAPABILITIES)) {
+		goto out;
+	} else {
+		ret = 0;
+	}
+
+	/* GETMXDS */
+	if (target->bcr & I3C_BCR_MAX_DATA_SPEED_LIMIT) {
+		ret = i3c_ccc_do_getmxds_fmt2(target, &mxds);
+		if (ret != 0) {
+			goto out;
+		}
+
+		target->data_speed.maxrd = mxds.fmt2.maxrd;
+		target->data_speed.maxwr = mxds.fmt2.maxwr;
+		target->data_speed.max_read_turnaround = sys_get_le24(mxds.fmt2.maxrdturn);
+	}
+
 	target->dcr = dcr.dcr;
 	target->data_length.mrl = mrl.len;
 	target->data_length.mwl = mwl.len;
@@ -572,11 +602,12 @@ out:
  */
 static int i3c_bus_setdasa(const struct device *dev,
 			   const struct i3c_dev_list *dev_list,
-			   bool *need_daa)
+			   bool *need_daa, bool *need_aasa)
 {
 	int i, ret;
 
 	*need_daa = false;
+	*need_aasa = false;
 
 	/* Loop through the registered I3C devices */
 	for (i = 0; i < dev_list->num_i3c; i++) {
@@ -588,6 +619,17 @@ static int i3c_bus_setdasa(const struct device *dev,
 		 */
 		if (desc->static_addr == 0U) {
 			*need_daa = true;
+			continue;
+		}
+
+		/*
+		 * A device that supports SETAASA and will use the same dynamic
+		 * address as its static address if a different dynamic address
+		 * is not requested
+		 */
+		if ((desc->supports_setaasa) && ((desc->init_dynamic_addr == 0) ||
+					       desc->init_dynamic_addr == desc->static_addr)) {
+			*need_aasa = true;
 			continue;
 		}
 
@@ -616,12 +658,101 @@ static int i3c_bus_setdasa(const struct device *dev,
 	return 0;
 }
 
+bool i3c_bus_has_sec_controller(const struct device *dev)
+{
+	struct i3c_device_desc *i3c_desc;
+
+	I3C_BUS_FOR_EACH_I3CDEV(dev, i3c_desc) {
+		if (i3c_device_is_controller_capable(i3c_desc)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+int i3c_bus_deftgts(const struct device *dev)
+{
+	struct i3c_driver_data *data = (struct i3c_driver_data *)dev->data;
+	struct i3c_config_target config_target;
+	struct i3c_ccc_deftgts *deftgts;
+	struct i3c_device_desc *i3c_desc;
+	struct i3c_i2c_device_desc *i3c_i2c_desc;
+	int ret;
+	uint8_t n = 0;
+	size_t num_of_targets = sys_slist_len(&data->attached_dev.devices.i3c) +
+				sys_slist_len(&data->attached_dev.devices.i2c);
+	size_t data_len = sizeof(uint8_t) +
+				   sizeof(struct i3c_ccc_deftgts_active_controller) +
+				   (num_of_targets * sizeof(struct i3c_ccc_deftgts_target));
+
+	/*
+	 * Retrieve the active controller information
+	 */
+	ret = i3c_config_get(dev, I3C_CONFIG_TARGET, &config_target);
+	if (ret != 0) {
+		LOG_ERR("Failed to retrieve active controller info");
+		return ret;
+	}
+
+	/* Allocate memory for the struct with enough space for the targets */
+	deftgts = malloc(data_len);
+	if (!deftgts) {
+		return -ENOMEM;
+	}
+
+	/*
+	 * Write the total number of I3C and I2C targets to the payload
+	 */
+	deftgts->count = num_of_targets;
+
+	/*
+	 * Add the active controller information to the payload
+	 */
+	deftgts->active_controller.addr = config_target.dynamic_addr << 1;
+	deftgts->active_controller.dcr = config_target.dcr;
+	deftgts->active_controller.bcr = config_target.bcr;
+	deftgts->active_controller.static_addr = I3C_BROADCAST_ADDR << 1;
+
+	/*
+	 * Loop through each attached I3C device and add it to the payload
+	 */
+	I3C_BUS_FOR_EACH_I3CDEV(dev, i3c_desc) {
+		deftgts->targets[n].addr = i3c_desc->dynamic_addr << 1;
+		deftgts->targets[n].dcr = i3c_desc->dcr;
+		deftgts->targets[n].bcr = i3c_desc->bcr;
+		deftgts->targets[n].static_addr = i3c_desc->static_addr << 1;
+		n++;
+	}
+
+	/*
+	 * Loop through each attached I2C device and add it to the payload
+	 */
+	I3C_BUS_FOR_EACH_I2CDEV(dev, i3c_i2c_desc) {
+		deftgts->targets[n].addr = 0;
+		deftgts->targets[n].lvr = i3c_i2c_desc->lvr;
+		deftgts->targets[n].bcr = 0;
+		deftgts->targets[n].static_addr = (uint8_t)(i3c_i2c_desc->addr << 1);
+		n++;
+	}
+
+	/* TODO: add support for Group Addr in DEFTGTS when that comes */
+
+	ret = i3c_ccc_do_deftgts_all(dev, deftgts);
+
+	free(deftgts);
+
+	return ret;
+}
+
 int i3c_bus_init(const struct device *dev, const struct i3c_dev_list *dev_list)
 {
 	int i, ret = 0;
 	bool need_daa = true;
+	bool need_aasa = true;
 	struct i3c_ccc_events i3c_events;
 
+#ifdef CONFIG_I3C_INIT_RSTACT
 	/*
 	 * Reset all connected targets. Also reset dynamic
 	 * addresses for all devices as we have no idea what
@@ -644,6 +775,7 @@ int i3c_bus_init(const struct device *dev, const struct i3c_dev_list *dev_list)
 			LOG_DBG("Broadcast RSTACT (peripehral) was NACK.");
 		}
 	}
+#endif
 
 	if (i3c_ccc_do_rstdaa_all(dev) != 0) {
 		LOG_DBG("Broadcast RSTDAA was NACK.");
@@ -663,9 +795,30 @@ int i3c_bus_init(const struct device *dev, const struct i3c_dev_list *dev_list)
 	/*
 	 * Set static addresses as dynamic addresses.
 	 */
-	ret = i3c_bus_setdasa(dev, dev_list, &need_daa);
+	ret = i3c_bus_setdasa(dev, dev_list, &need_daa, &need_aasa);
 	if (ret != 0) {
 		goto err_out;
+	}
+
+	/*
+	 * Perform Set All Addresses to Static Address if possible.
+	 */
+	if (need_aasa) {
+		ret = i3c_ccc_do_setaasa_all(dev);
+		if (ret != 0) {
+			for (i = 0; i < dev_list->num_i3c; i++) {
+				struct i3c_device_desc *desc = &dev_list->i3c[i];
+				/*
+				 * Only set for devices that support SETAASA and do not
+				 * request a different dynamic address than its SA
+				 */
+				if ((desc->supports_setaasa) && (desc->static_addr != 0) &&
+				    ((desc->init_dynamic_addr == 0) ||
+				     desc->init_dynamic_addr == desc->static_addr)) {
+					desc->dynamic_addr = desc->static_addr;
+				}
+			}
+		}
 	}
 
 	/*
@@ -711,6 +864,13 @@ int i3c_bus_init(const struct device *dev, const struct i3c_dev_list *dev_list)
 				desc->dynamic_addr, desc->bcr, desc->dcr,
 				desc->data_length.mrl, desc->data_length.mwl,
 				desc->data_length.max_ibi);
+		}
+	}
+
+	if (i3c_bus_has_sec_controller(dev)) {
+		ret = i3c_bus_deftgts(dev);
+		if (ret != 0) {
+			LOG_ERR("Error sending DEFTGTS");
 		}
 	}
 

@@ -3,6 +3,7 @@
 # Copyright (c) 2018-2022 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+import copy
 import scl
 import warnings
 from typing import Union
@@ -35,7 +36,7 @@ def extract_fields_from_arg_list(target_fields: set, arg_list: Union[str, list])
             # Move to other_fields
             other_fields.append(field)
 
-    return extracted_fields, " ".join(other_fields)
+    return extracted_fields, other_fields
 
 class TwisterConfigParser:
     """Class to read testsuite yaml files with semantic checking
@@ -48,6 +49,7 @@ class TwisterConfigParser:
                        "extra_conf_files": {"type": "list", "default": []},
                        "extra_overlay_confs" : {"type": "list", "default": []},
                        "extra_dtc_overlay_files": {"type": "list", "default": []},
+                       "required_snippets": {"type": "list"},
                        "build_only": {"type": "bool", "default": False},
                        "build_on_all": {"type": "bool", "default": False},
                        "skip": {"type": "bool", "default": False},
@@ -68,6 +70,7 @@ class TwisterConfigParser:
                        "platform_exclude": {"type": "set"},
                        "platform_allow": {"type": "set"},
                        "platform_key": {"type": "list", "default": []},
+                       "simulation_exclude": {"type": "list", "default": []},
                        "toolchain_exclude": {"type": "set"},
                        "toolchain_allow": {"type": "set"},
                        "filter": {"type": "str"},
@@ -175,7 +178,8 @@ class TwisterConfigParser:
                     {"CONF_FILE", "OVERLAY_CONFIG", "DTC_OVERLAY_FILE"}, v
                 )
             else:
-                d[k] = v
+                # Copy common value to avoid mutating it with test specific values below
+                d[k] = copy.copy(v)
 
         for k, v in self.scenarios[name].items():
             if k == "extra_args":

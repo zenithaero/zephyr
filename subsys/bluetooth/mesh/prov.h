@@ -78,7 +78,7 @@
 	NET_BUF_SIMPLE_DEFINE(name, PROV_BEARER_BUF_HEADROOM + PDU_OP_LEN + len +                  \
 					    PROV_BEARER_BUF_TAILROOM)
 
-#if IS_ENABLED(CONFIG_BT_MESH_ECDH_P256_HMAC_SHA256_AES_CCM)
+#if defined(CONFIG_BT_MESH_ECDH_P256_HMAC_SHA256_AES_CCM)
 #define PROV_AUTH_MAX_LEN   32
 #else
 #define PROV_AUTH_MAX_LEN   16
@@ -168,6 +168,14 @@ static inline void bt_mesh_prov_buf_init(struct net_buf_simple *buf, uint8_t typ
 static inline uint8_t bt_mesh_prov_auth_size_get(void)
 {
 	return bt_mesh_prov_link.algorithm == BT_MESH_PROV_AUTH_CMAC_AES128_AES_CCM ? 16 : 32;
+}
+
+static inline k_timeout_t bt_mesh_prov_protocol_timeout_get(void)
+{
+	return (bt_mesh_prov_link.oob_method == AUTH_METHOD_INPUT ||
+		bt_mesh_prov_link.oob_method == AUTH_METHOD_OUTPUT)
+		       ? PROTOCOL_TIMEOUT_EXT
+		       : PROTOCOL_TIMEOUT;
 }
 
 int bt_mesh_prov_reset_state(void);

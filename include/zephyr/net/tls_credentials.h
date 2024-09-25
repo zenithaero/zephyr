@@ -16,6 +16,8 @@
 /**
  * @brief TLS credentials management
  * @defgroup tls_credentials TLS credentials management
+ * @since 1.13
+ * @version 0.8.0
  * @ingroup networking
  * @{
  */
@@ -66,6 +68,8 @@ enum tls_credential_type {
  *    - TLS_CREDENTIAL_PSK with TLS_CREDENTIAL_PSK_ID.
  *    Such pairs of credentials must be assigned the same secure tag to be
  *    correctly handled in the system.
+ *
+ * @note Negative values are reserved for internal use.
  */
 typedef int sec_tag_t;
 

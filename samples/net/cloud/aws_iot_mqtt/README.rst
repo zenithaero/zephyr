@@ -1,7 +1,8 @@
-.. _aws-iot-mqtt-sample:
+.. zephyr:code-sample:: aws-iot-mqtt
+   :name: AWS IoT Core MQTT
+   :relevant-api: bsd_sockets mqtt_socket dns_resolve tls_credentials json sntp random_api
 
-AWS IoT Core MQTT Sample
-########################
+   Connect to AWS IoT Core and publish messages using MQTT.
 
 Overview
 ********
@@ -36,7 +37,7 @@ the certificate and private key in order to embed them in the application.
 
 Register a *thing* in AWS IoT Core and download the certificate and private key.
 Copy these files to the :zephyr_file:`samples/net/cloud/aws_iot_mqtt/src/creds`
-directory. Run the :zephyr_file:`samples/net/cloud/aws_iot_mqtt/src/creds/convert_certs.py`
+directory. Run the :zephyr_file:`samples/net/cloud/aws_iot_mqtt/src/creds/convert_keys.py`
 script, which will generate files ``ca.c``, ``cert.c`` and ``key.c``.
 
 To configure the sample, set the following Kconfig options based on your AWS IoT
@@ -44,6 +45,7 @@ Core region, thing, and device advisor configuration:
 
 - :kconfig:option:`CONFIG_AWS_ENDPOINT`: The AWS IoT Core broker endpoint, found in the AWS IoT Core
   console. This will be specific if running a test suite using device advisor.
+- :kconfig:option:`CONFIG_AWS_MQTT_PORT`: Port number for AWS IoT Core MQTT broker.
 - :kconfig:option:`CONFIG_AWS_THING_NAME`: The name of the thing created in AWS IoT Core. Associated
   with the certificate it will be used as the client id. We will use
   ``zephyr_sample`` in this example.

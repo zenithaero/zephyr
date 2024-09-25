@@ -156,7 +156,7 @@ uint8_t ull_cp_remote_cpr_pending(struct ll_conn *conn);
 bool ull_cp_remote_cpr_apm_awaiting_reply(struct ll_conn *conn);
 
 /**
- * @brief Repsond to anchor point move of remote connection
+ * @brief Respond to anchor point move of remote connection
  *        param reg.
  */
 void ull_cp_remote_cpr_apm_reply(struct ll_conn *conn, uint16_t *offsets);
@@ -198,6 +198,11 @@ bool ull_cp_cc_awaiting_reply(struct ll_conn *conn);
  * @brief Is ongoing create cis procedure expecting an established event?
  */
 bool ull_cp_cc_awaiting_established(struct ll_conn *conn);
+
+/**
+ * @brief Cancel ongoing create cis procedure
+ */
+bool ull_cp_cc_cancel(struct ll_conn *conn);
 
 /**
  * @brief Get handle of ongoing create cis procedure.

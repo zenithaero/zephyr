@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021 The Chromium OS Authors
  * Copyright (c) 2020 Linaro Limited
+ * Copyright (c) 2024 STMicroelectronics
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,11 +36,32 @@
 			reg = <0>;
 			#address-cells = <1>;
 			#size-cells = <1>;
+			cpu-power-states = <&stop0 &stop1 &stop2>;
 
 			mpu: mpu@e000ed90 {
 				compatible = "arm,armv8m-mpu";
 				reg = <0xe000ed90 0x40>;
-				arm,num-mpu-regions = <8>;
+			};
+		};
+
+		power-states {
+			stop0: state0 {
+				compatible = "zephyr,power-state";
+				power-state-name = "suspend-to-idle";
+				substate-id = <1>;
+				min-residency-us = <100>;
+			};
+			stop1: state1 {
+				compatible = "zephyr,power-state";
+				power-state-name = "suspend-to-idle";
+				substate-id = <2>;
+				min-residency-us = <500>;
+			};
+			stop2: state2 {
+				compatible = "zephyr,power-state";
+				power-state-name = "suspend-to-idle";
+				substate-id = <3>;
+				min-residency-us = <900>;
 			};
 		};
 	};
@@ -95,27 +117,6 @@
 			#clock-cells = <0>;
 			compatible = "st,stm32l4-pll-clock";
 			status = "disabled";
-		};
-	};
-
-	power-states {
-		stop0: state0 {
-			compatible = "zephyr,power-state";
-			power-state-name = "suspend-to-idle";
-			substate-id = <1>;
-			min-residency-us = <100>;
-		};
-		stop1: state1 {
-			compatible = "zephyr,power-state";
-			power-state-name = "suspend-to-idle";
-			substate-id = <2>;
-			min-residency-us = <500>;
-		};
-		stop2: state2 {
-			compatible = "zephyr,power-state";
-			power-state-name = "suspend-to-idle";
-			substate-id = <3>;
-			min-residency-us = <900>;
 		};
 	};
 
@@ -460,6 +461,8 @@
 			interrupts = <2 0>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00000400>;
 			prescaler = <32768>;
+			alarms-count = <2>;
+			alrm-exti-line = <17>;
 			status = "disabled";
 		};
 
@@ -658,14 +661,12 @@
 			interrupts = <37 0>;
 			status = "disabled";
 			#io-channel-cells = <1>;
-			temp-channel = <17>;
-			vbat-channel = <18>;
-			vref-channel = <0>;
 			resolutions = <STM32_ADC_RES(12, 0x00)
 				       STM32_ADC_RES(10, 0x01)
 				       STM32_ADC_RES(8, 0x02)
 				       STM32_ADC_RES(6, 0x03)>;
 			sampling-times = <3 7 13 25 48 93 248 641>;
+			st,adc-sequencer = <FULLY_CONFIGURABLE>;
 		};
 
 		adc2: adc@42028100 {
@@ -680,6 +681,7 @@
 				       STM32_ADC_RES(8, 0x02)
 				       STM32_ADC_RES(6, 0x03)>;
 			sampling-times = <3 7 13 25 48 93 248 641>;
+			st,adc-sequencer = <FULLY_CONFIGURABLE>;
 		};
 
 		usb: usb@4000d400 {
@@ -700,6 +702,13 @@
 			reg = <0x4000dc00 0x400>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x00800000>;
 			interrupts = <106 0>;
+			status = "disabled";
+		};
+
+		fmc: fmc@44020000 {
+			compatible = "st,stm32-fmc";
+			reg = <0x44020000 0x400>;
+			clocks = <&rcc STM32_CLOCK_BUS_AHB3 0x00000001>;
 			status = "disabled";
 		};
 	};
@@ -733,6 +742,22 @@
 	usb_fs_phy: usbphy {
 		compatible = "usb-nop-xceiv";
 		#phy-cells = <0>;
+	};
+
+	smbus1: smbus1 {
+		compatible = "st,stm32-smbus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c = <&i2c1>;
+		status = "disabled";
+	};
+
+	smbus2: smbus2 {
+		compatible = "st,stm32-smbus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c = <&i2c2>;
+		status = "disabled";
 	};
 
 };

@@ -44,7 +44,7 @@ struct sof_dai_ssp_params {
 } __packed;
 
 static const struct device *const dev_dai_ssp =
-	DEVICE_DT_GET(DT_NODELABEL(ssp0));
+	DEVICE_DT_GET(DT_NODELABEL(ssp00));
 static const struct device *const dev_dma_dw =
 	DEVICE_DT_GET(DT_NODELABEL(lpgpdma0));
 
@@ -405,6 +405,17 @@ static void *adsp_ssp_setup(void)
 	test_adsp_ssp_probe();
 
 	return NULL;
+}
+
+
+bool adsp_clock_source_is_supported(int source)
+{
+	return true;
+}
+
+uint32_t adsp_clock_source_frequency(int source)
+{
+	return 0;
 }
 
 ZTEST_SUITE(adsp_ssp, NULL, adsp_ssp_setup, NULL, NULL, NULL);

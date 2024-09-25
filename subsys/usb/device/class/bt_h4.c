@@ -12,7 +12,7 @@
 #include <zephyr/usb/usb_device.h>
 #include <usb_descriptor.h>
 
-#include <zephyr/net/buf.h>
+#include <zephyr/net_buf.h>
 
 #include <zephyr/bluetooth/buf.h>
 #include <zephyr/bluetooth/hci_raw.h>
@@ -105,7 +105,7 @@ static void bt_h4_read(uint8_t ep, int size, void *priv)
 			return;
 		}
 
-		net_buf_put(&rx_queue, buf);
+		k_fifo_put(&rx_queue, buf);
 	}
 
 	/* Start a new read transfer */
@@ -113,14 +113,18 @@ static void bt_h4_read(uint8_t ep, int size, void *priv)
 		     USB_MAX_FS_BULK_MPS, USB_TRANS_READ, bt_h4_read, NULL);
 }
 
-static void hci_tx_thread(void)
+static void hci_tx_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	LOG_DBG("Start USB Bluetooth thread");
 
 	while (true) {
 		struct net_buf *buf;
 
-		buf = net_buf_get(&tx_queue, K_FOREVER);
+		buf = k_fifo_get(&tx_queue, K_FOREVER);
 
 		usb_transfer_sync(bt_h4_ep_data[BT_H4_IN_EP_IDX].ep_addr,
 				  buf->data, buf->len, USB_TRANS_WRITE);
@@ -129,12 +133,16 @@ static void hci_tx_thread(void)
 	}
 }
 
-static void hci_rx_thread(void)
+static void hci_rx_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	while (true) {
 		struct net_buf *buf;
 
-		buf = net_buf_get(&rx_queue, K_FOREVER);
+		buf = k_fifo_get(&rx_queue, K_FOREVER);
 		if (bt_send(buf)) {
 			LOG_ERR("Error sending to driver");
 			net_buf_unref(buf);
@@ -235,14 +243,14 @@ static int bt_h4_init(void)
 
 	k_thread_create(&rx_thread_data, rx_thread_stack,
 			K_KERNEL_STACK_SIZEOF(rx_thread_stack),
-			(k_thread_entry_t)hci_rx_thread, NULL, NULL, NULL,
+			hci_rx_thread, NULL, NULL, NULL,
 			K_PRIO_COOP(8), 0, K_NO_WAIT);
 
 	k_thread_name_set(&rx_thread_data, "usb_bt_h4_rx");
 
 	k_thread_create(&tx_thread_data, tx_thread_stack,
 			K_KERNEL_STACK_SIZEOF(tx_thread_stack),
-			(k_thread_entry_t)hci_tx_thread, NULL, NULL, NULL,
+			hci_tx_thread, NULL, NULL, NULL,
 			K_PRIO_COOP(8), 0, K_NO_WAIT);
 
 	k_thread_name_set(&tx_thread_data, "usb_bt_h4_tx");

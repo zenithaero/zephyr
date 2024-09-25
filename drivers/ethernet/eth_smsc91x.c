@@ -4,7 +4,7 @@
  */
 
 #include <zephyr/net/ethernet.h>
-#include "zephyr/net/phy.h"
+#include <zephyr/net/phy.h>
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys_clock.h>
 #include <zephyr/drivers/mdio.h>
@@ -99,8 +99,9 @@ static ALWAYS_INLINE unsigned int smsc_current_bank(struct smsc_data *sc)
 static void smsc_mmu_wait(struct smsc_data *sc)
 {
 	__ASSERT((smsc_current_bank(sc) == 2), "%s called when not in bank 2", __func__);
-	while (sys_read16(sc->smsc_reg + MMUCR) & MMUCR_BUSY)
+	while (sys_read16(sc->smsc_reg + MMUCR) & MMUCR_BUSY) {
 		;
+	}
 }
 
 static ALWAYS_INLINE uint8_t smsc_read_1(struct smsc_data *sc, int offset)
@@ -251,6 +252,8 @@ static void smsc_miibus_writereg(struct smsc_data *sc, int phy, int reg, uint16_
 {
 	irq_disable(sc->irq);
 	SMSC_LOCK(sc);
+
+	smsc_select_bank(sc, 3);
 
 	smsc_miibus_sync(sc);
 
@@ -520,7 +523,7 @@ static int smsc_send_pkt(struct smsc_data *sc, uint8_t *buf, uint16_t len)
 	smsc_write_2(sc, DATA0, len + PKT_CTRL_DATA_LEN);
 	smsc_write_multi_2(sc, DATA0, (uint16_t *)buf, len / 2);
 
-	/* Push out the control byte and and the odd byte if needed. */
+	/* Push out the control byte and the odd byte if needed. */
 	if (len & 1) {
 		smsc_write_2(sc, DATA0, (CTRL_ODD << 8) | buf[len - 1]);
 	} else {
@@ -661,6 +664,13 @@ static int smsc_init(struct smsc_data *sc)
 	return 0;
 }
 
+static const struct device *eth_get_phy(const struct device *dev)
+{
+	const struct eth_config *cfg = dev->config;
+
+	return cfg->phy_dev;
+}
+
 static void phy_link_state_changed(const struct device *phy_dev, struct phy_link_state *state,
 				   void *user_data)
 {
@@ -678,7 +688,12 @@ static enum ethernet_hw_caps eth_smsc_get_caps(const struct device *dev)
 {
 	ARG_UNUSED(dev);
 
-	return ETHERNET_LINK_10BASE_T | ETHERNET_LINK_100BASE_T;
+	return (ETHERNET_LINK_10BASE_T
+		| ETHERNET_LINK_100BASE_T
+#if defined(CONFIG_NET_PROMISCUOUS_MODE)
+		| ETHERNET_PROMISC_MODE
+#endif
+	);
 }
 
 static int eth_tx(const struct device *dev, struct net_pkt *pkt)
@@ -694,6 +709,41 @@ static int eth_tx(const struct device *dev, struct net_pkt *pkt)
 	}
 
 	return smsc_send_pkt(sc, tx_buffer, len);
+}
+
+static int eth_smsc_set_config(const struct device *dev,
+			       enum ethernet_config_type type,
+			       const struct ethernet_config *config)
+{
+	int ret = 0;
+
+	switch (type) {
+#if defined(CONFIG_NET_PROMISCUOUS_MODE)
+	case ETHERNET_CONFIG_TYPE_PROMISC_MODE:
+		struct eth_context *data = dev->data;
+		struct smsc_data *sc = &data->sc;
+		uint8_t reg_val;
+
+		SMSC_LOCK(sc);
+		smsc_select_bank(sc, 0);
+		reg_val = smsc_read_1(sc, RCR);
+		if (config->promisc_mode && !(reg_val & RCR_PRMS)) {
+			smsc_write_1(sc, RCR, reg_val | RCR_PRMS);
+		} else if (!config->promisc_mode && (reg_val & RCR_PRMS)) {
+			smsc_write_1(sc, RCR, reg_val & ~RCR_PRMS);
+		} else {
+			ret = -EALREADY;
+		}
+		SMSC_UNLOCK(sc);
+		break;
+#endif
+
+	default:
+		ret = -ENOTSUP;
+		break;
+	}
+
+	return ret;
 }
 
 static void eth_initialize(struct net_if *iface)
@@ -725,9 +775,11 @@ static void eth_initialize(struct net_if *iface)
 }
 
 static const struct ethernet_api api_funcs = {
-	.iface_api.init = eth_initialize,
+	.iface_api.init   = eth_initialize,
 	.get_capabilities = eth_smsc_get_caps,
-	.send = eth_tx,
+	.get_phy          = eth_get_phy,
+	.set_config       = eth_smsc_set_config,
+	.send             = eth_tx,
 };
 
 static void eth_smsc_isr(const struct device *dev)
@@ -778,8 +830,8 @@ int eth_init(const struct device *dev)
 static struct eth_context eth_0_context;
 
 static struct eth_config eth_0_config = {
-	DEVICE_MMIO_ROM_INIT(DT_DRV_INST(0)),
-	.phy_dev = DEVICE_DT_GET(DT_INST_CHILD(0, phy)),
+	DEVICE_MMIO_ROM_INIT(DT_PARENT(DT_DRV_INST(0))),
+	.phy_dev = DEVICE_DT_GET(DT_INST_PHANDLE(0, phy_handle)),
 };
 
 ETH_NET_DEVICE_DT_INST_DEFINE(0,
@@ -836,7 +888,7 @@ static const struct mdio_driver_api mdio_smsc_api = {
 };
 
 const struct mdio_smsc_config mdio_smsc_config_0 = {
-	.eth_dev = DEVICE_DT_GET(DT_INST_PARENT(0)),
+	.eth_dev = DEVICE_DT_GET(DT_CHILD(DT_INST_PARENT(0), ethernet)),
 };
 
 DEVICE_DT_INST_DEFINE(0, NULL, NULL, NULL, &mdio_smsc_config_0, POST_KERNEL,

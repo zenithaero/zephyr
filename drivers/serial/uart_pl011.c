@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018 Linaro Limited
  * Copyright (c) 2022 Arm Limited (or its affiliates). All rights reserved.
+ * Copyright (c) 2023 Antmicro <www.antmicro.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,6 +9,7 @@
 #define DT_DRV_COMPAT arm_pl011
 #define SBSA_COMPAT arm_sbsa_uart
 
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/arch/cpu.h>
 #include <zephyr/init.h>
@@ -19,160 +21,62 @@
 #if defined(CONFIG_PINCTRL)
 #include <zephyr/drivers/pinctrl.h>
 #endif
+#if defined(CONFIG_RESET)
+#include <zephyr/drivers/reset.h>
+#endif
+#if defined(CONFIG_CLOCK_CONTROL)
+#include <zephyr/drivers/clock_control.h>
+#endif
 
 #ifdef CONFIG_CPU_CORTEX_M
 #include <cmsis_compiler.h>
 #endif
 
-/*
- * UART PL011 register map structure
- */
-struct pl011_regs {
-	uint32_t dr;			/* data register */
-	union {
-		uint32_t rsr;
-		uint32_t ecr;
-	};
-	uint32_t reserved_0[4];
-	uint32_t fr;			/* flags register */
-	uint32_t reserved_1;
-	uint32_t ilpr;
-	uint32_t ibrd;
-	uint32_t fbrd;
-	uint32_t lcr_h;
-	uint32_t cr;
-	uint32_t ifls;
-	uint32_t imsc;
-	uint32_t ris;
-	uint32_t mis;
-	uint32_t icr;
-	uint32_t dmacr;
-};
+#include "uart_pl011_registers.h"
+
+#if defined(CONFIG_SOC_FAMILY_AMBIQ)
+#include "uart_pl011_ambiq.h"
+#endif
+
+#if defined(CONFIG_SOC_SERIES_APOLLO3X)
+#define PM_INST_GET(n) PM_DEVICE_DT_INST_GET(n)
+#else
+#define PM_INST_GET(n) NULL
+#endif
+
+#include "uart_pl011_raspberrypi_pico.h"
 
 struct pl011_config {
 	DEVICE_MMIO_ROM;
-	uint32_t sys_clk_freq;
 #if defined(CONFIG_PINCTRL)
 	const struct pinctrl_dev_config *pincfg;
+#endif
+#if defined(CONFIG_RESET)
+	const struct reset_dt_spec reset;
+#endif
+#if defined(CONFIG_CLOCK_CONTROL)
+	const struct device *clock_dev;
+	clock_control_subsys_t clock_id;
 #endif
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	uart_irq_config_func_t irq_config_func;
 #endif
+	int (*clk_enable_func)(const struct device *dev, uint32_t clk);
+	int (*pwr_on_func)(void);
 };
 
 /* Device data structure */
 struct pl011_data {
 	DEVICE_MMIO_RAM;
-	uint32_t baud_rate;	/* Baud rate */
+	struct uart_config uart_cfg;
 	bool sbsa;		/* SBSA mode */
+	uint32_t clk_freq;
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	volatile bool sw_call_txdrdy;
 	uart_irq_callback_user_data_t irq_cb;
 	void *irq_cb_data;
 #endif
 };
-
-#define PL011_BIT_MASK(x, y) (((2 << x) - 1) << y)
-
-/* PL011 Uart Flags Register */
-#define PL011_FR_CTS		BIT(0)	/* clear to send - inverted */
-#define PL011_FR_DSR		BIT(1)	/* data set ready - inverted */
-#define PL011_FR_DCD		BIT(2)	/* data carrier detect - inverted */
-#define PL011_FR_BUSY		BIT(3)	/* busy transmitting data */
-#define PL011_FR_RXFE		BIT(4)	/* receive FIFO empty */
-#define PL011_FR_TXFF		BIT(5)	/* transmit FIFO full */
-#define PL011_FR_RXFF		BIT(6)	/* receive FIFO full */
-#define PL011_FR_TXFE		BIT(7)	/* transmit FIFO empty */
-#define PL011_FR_RI		BIT(8)	/* ring indicator - inverted */
-
-/* PL011 Integer baud rate register */
-#define PL011_IBRD_BAUD_DIVINT_MASK	0xff	/* 16 bits of divider */
-
-/* PL011 Fractional baud rate register */
-#define PL011_FBRD_BAUD_DIVFRAC		0x3f
-#define PL011_FBRD_WIDTH		6u
-
-/* PL011 Receive status register / error clear register */
-#define PL011_RSR_ECR_FE	BIT(0)	/* framing error */
-#define PL011_RSR_ECR_PE	BIT(1)	/* parity error */
-#define PL011_RSR_ECR_BE	BIT(2)	/* break error */
-#define PL011_RSR_ECR_OE	BIT(3)	/* overrun error */
-
-#define PL011_RSR_ERROR_MASK	(PL011_RSR_ECR_FE | PL011_RSR_ECR_PE | \
-		PL011_RSR_ECR_BE | PL011_RSR_ECR_OE)
-
-/* PL011 Line Control Register  */
-#define PL011_LCRH_BRK		BIT(0)	/* send break */
-#define PL011_LCRH_PEN		BIT(1)	/* enable parity */
-#define PL011_LCRH_EPS		BIT(2)	/* select even parity */
-#define PL011_LCRH_STP2		BIT(3)	/* select two stop bits */
-#define PL011_LCRH_FEN		BIT(4)	/* enable FIFOs */
-#define PL011_LCRH_WLEN_SHIFT	5	/* word length */
-#define PL011_LCRH_WLEN_WIDTH	2
-#define PL011_LCRH_SPS		BIT(7)	/* stick parity bit */
-
-#define PL011_LCRH_WLEN_SIZE(x) (x - 5)
-
-#define PL011_LCRH_FORMAT_MASK	(PL011_LCRH_PEN | PL011_LCRH_EPS | \
-		PL011_LCRH_SPS | \
-		PL011_BIT_MASK(PL011_LCRH_WLEN_WIDTH, PL011_LCRH_WLEN_SHIFT))
-
-#define PL011_LCRH_PARTIY_EVEN	(PL011_LCRH_PEN | PL011_LCRH_EPS)
-#define PL011_LCRH_PARITY_ODD	(PL011_LCRH_PEN)
-#define PL011_LCRH_PARITY_NONE	(0)
-
-/* PL011 Control Register */
-#define PL011_CR_UARTEN		BIT(0)	/* enable uart operations */
-#define PL011_CR_SIREN		BIT(1)	/* enable IrDA SIR */
-#define PL011_CR_SIRLP		BIT(2)	/* IrDA SIR low power mode */
-#define PL011_CR_LBE		BIT(7)	/* loop back enable */
-#define PL011_CR_TXE		BIT(8)	/* transmit enable */
-#define PL011_CR_RXE		BIT(9)	/* receive enable */
-#define PL011_CR_DTR		BIT(10)	/* data transmit ready */
-#define PL011_CR_RTS		BIT(11)	/* request to send */
-#define PL011_CR_Out1		BIT(12)
-#define PL011_CR_Out2		BIT(13)
-#define PL011_CR_RTSEn		BIT(14)	/* RTS hw flow control enable */
-#define PL011_CR_CTSEn		BIT(15)	/* CTS hw flow control enable */
-
-/* PL011 Interrupt Fifo Level Select Register */
-#define PL011_IFLS_RXIFLSEL_M	GENMASK(5, 3)
-#define RXIFLSEL_1_2_FULL	2UL
-#define PL011_IFLS_TXIFLSEL_M	GENMASK(2, 0)
-#define TXIFLSEL_1_8_FULL	0UL
-
-/* PL011 Interrupt Mask Set/Clear Register */
-#define PL011_IMSC_RIMIM	BIT(0)	/* RTR modem interrupt mask */
-#define PL011_IMSC_CTSMIM	BIT(1)	/* CTS modem interrupt mask */
-#define PL011_IMSC_DCDMIM	BIT(2)	/* DCD modem interrupt mask */
-#define PL011_IMSC_DSRMIM	BIT(3)	/* DSR modem interrupt mask */
-#define PL011_IMSC_RXIM		BIT(4)	/* receive interrupt mask */
-#define PL011_IMSC_TXIM		BIT(5)	/* transmit interrupt mask */
-#define PL011_IMSC_RTIM		BIT(6)	/* receive timeout interrupt mask */
-#define PL011_IMSC_FEIM		BIT(7)	/* framing error interrupt mask */
-#define PL011_IMSC_PEIM		BIT(8)	/* parity error interrupt mask */
-#define PL011_IMSC_BEIM		BIT(9)	/* break error interrupt mask */
-#define PL011_IMSC_OEIM		BIT(10)	/* overrun error interrupt mask */
-
-#define PL011_IMSC_ERROR_MASK	(PL011_IMSC_FEIM | \
-		PL011_IMSC_PEIM | PL011_IMSC_BEIM | \
-		PL011_IMSC_OEIM)
-
-#define PL011_IMSC_MASK_ALL (PL011_IMSC_OEIM | PL011_IMSC_BEIM | \
-		PL011_IMSC_PEIM | PL011_IMSC_FEIM | \
-		PL011_IMSC_RIMIM | PL011_IMSC_CTSMIM | \
-		PL011_IMSC_DCDMIM | PL011_IMSC_DSRMIM | \
-		PL011_IMSC_RXIM | PL011_IMSC_TXIM | \
-		PL011_IMSC_RTIM)
-
-/* PL011 Raw Interrupt Status Register */
-#define PL011_RIS_TXRIS		BIT(5)	/* Transmit interrupt status */
-
-static inline
-volatile struct pl011_regs *const get_uart(const struct device *dev)
-{
-	return (volatile struct pl011_regs *const)DEVICE_MMIO_GET(dev);
-}
 
 static void pl011_enable(const struct device *dev)
 {
@@ -192,6 +96,20 @@ static void pl011_enable_fifo(const struct device *dev)
 static void pl011_disable_fifo(const struct device *dev)
 {
 	get_uart(dev)->lcr_h &= ~PL011_LCRH_FEN;
+}
+
+static void pl011_set_flow_control(const struct device *dev, bool rts, bool cts)
+{
+	if (rts) {
+		get_uart(dev)->cr |= PL011_CR_RTSEn;
+	} else {
+		get_uart(dev)->cr &= ~PL011_CR_RTSEn;
+	}
+	if (cts) {
+		get_uart(dev)->cr |= PL011_CR_CTSEn;
+	} else {
+		get_uart(dev)->cr &= ~PL011_CR_CTSEn;
+	}
 }
 
 static int pl011_set_baudrate(const struct device *dev,
@@ -260,6 +178,141 @@ static void pl011_poll_out(const struct device *dev,
 	get_uart(dev)->dr = (uint32_t)c;
 }
 
+static int pl011_err_check(const struct device *dev)
+{
+	int errors = 0;
+
+	if (get_uart(dev)->rsr & PL011_RSR_ECR_OE) {
+		errors |= UART_ERROR_OVERRUN;
+	}
+
+	if (get_uart(dev)->rsr & PL011_RSR_ECR_BE) {
+		errors |= UART_BREAK;
+	}
+
+	if (get_uart(dev)->rsr & PL011_RSR_ECR_PE) {
+		errors |= UART_ERROR_PARITY;
+	}
+
+	if (get_uart(dev)->rsr & PL011_RSR_ECR_FE) {
+		errors |= UART_ERROR_FRAMING;
+	}
+
+	return errors;
+}
+
+static int pl011_runtime_configure_internal(const struct device *dev,
+					const struct uart_config *cfg,
+					bool disable)
+{
+	struct pl011_data *data = dev->data;
+	uint32_t lcrh;
+	int ret = -ENOTSUP;
+
+	if (data->sbsa) {
+		goto out;
+	}
+
+	if (disable) {
+		pl011_disable(dev);
+		pl011_disable_fifo(dev);
+	}
+
+	lcrh = get_uart(dev)->lcr_h & ~(PL011_LCRH_FORMAT_MASK | PL011_LCRH_STP2);
+
+	switch (cfg->parity) {
+	case UART_CFG_PARITY_NONE:
+		lcrh &= ~(BIT(1) | BIT(2));
+		break;
+	case UART_CFG_PARITY_ODD:
+		lcrh |= PL011_LCRH_PARITY_ODD;
+		break;
+	case UART_CFG_PARITY_EVEN:
+		lcrh |= PL011_LCRH_PARTIY_EVEN;
+		break;
+	default:
+		goto enable;
+	}
+
+	switch (cfg->stop_bits) {
+	case UART_CFG_STOP_BITS_1:
+		lcrh &= ~(PL011_LCRH_STP2);
+		break;
+	case UART_CFG_STOP_BITS_2:
+		lcrh |= PL011_LCRH_STP2;
+		break;
+	default:
+		goto enable;
+	}
+
+	switch (cfg->data_bits) {
+	case UART_CFG_DATA_BITS_5:
+		lcrh |= PL011_LCRH_WLEN_SIZE(5) << PL011_LCRH_WLEN_SHIFT;
+		break;
+	case UART_CFG_DATA_BITS_6:
+		lcrh |= PL011_LCRH_WLEN_SIZE(6) << PL011_LCRH_WLEN_SHIFT;
+		break;
+	case UART_CFG_DATA_BITS_7:
+		lcrh |= PL011_LCRH_WLEN_SIZE(7) << PL011_LCRH_WLEN_SHIFT;
+		break;
+	case UART_CFG_DATA_BITS_8:
+		lcrh |= PL011_LCRH_WLEN_SIZE(8) << PL011_LCRH_WLEN_SHIFT;
+		break;
+	default:
+		goto enable;
+	}
+
+	switch (cfg->flow_ctrl) {
+	case UART_CFG_FLOW_CTRL_NONE:
+		pl011_set_flow_control(dev, false, false);
+		break;
+	case UART_CFG_FLOW_CTRL_RTS_CTS:
+		pl011_set_flow_control(dev, true, true);
+		break;
+	default:
+		goto enable;
+	}
+
+	/* Set baud rate */
+	ret = pl011_set_baudrate(dev, data->clk_freq, cfg->baudrate);
+	if (ret != 0) {
+		goto enable;
+	}
+
+	/* Update settings */
+	get_uart(dev)->lcr_h = lcrh;
+
+	memcpy(&data->uart_cfg, cfg, sizeof(data->uart_cfg));
+
+enable:
+	if (disable) {
+		pl011_enable_fifo(dev);
+		pl011_enable(dev);
+	}
+
+out:
+	return ret;
+}
+
+#ifdef CONFIG_UART_USE_RUNTIME_CONFIGURE
+
+static int pl011_runtime_configure(const struct device *dev,
+				const struct uart_config *cfg)
+{
+	return pl011_runtime_configure_internal(dev, cfg, true);
+}
+
+static int pl011_runtime_config_get(const struct device *dev,
+				struct uart_config *cfg)
+{
+	struct pl011_data *data = dev->data;
+
+	*cfg = data->uart_cfg;
+	return 0;
+}
+
+#endif /* CONFIG_UART_USE_RUNTIME_CONFIGURE */
+
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 static int pl011_fifo_fill(const struct device *dev,
 				    const uint8_t *tx_data, int len)
@@ -325,8 +378,9 @@ static int pl011_irq_tx_ready(const struct device *dev)
 {
 	struct pl011_data *data = dev->data;
 
-	if (!data->sbsa && !(get_uart(dev)->cr & PL011_CR_TXE))
+	if (!data->sbsa && !(get_uart(dev)->cr & PL011_CR_TXE)) {
 		return false;
+	}
 
 	return ((get_uart(dev)->imsc & PL011_IMSC_TXIM) &&
 		/* Check for TX interrupt status is set or TX FIFO is empty. */
@@ -347,8 +401,9 @@ static int pl011_irq_rx_ready(const struct device *dev)
 {
 	struct pl011_data *data = dev->data;
 
-	if (!data->sbsa && !(get_uart(dev)->cr & PL011_CR_RXE))
+	if (!data->sbsa && !(get_uart(dev)->cr & PL011_CR_RXE)) {
 		return false;
+	}
 
 	return ((get_uart(dev)->imsc & PL011_IMSC_RXIM) &&
 		(!(get_uart(dev)->fr & PL011_FR_RXFE)));
@@ -389,6 +444,11 @@ static void pl011_irq_callback_set(const struct device *dev,
 static const struct uart_driver_api pl011_driver_api = {
 	.poll_in = pl011_poll_in,
 	.poll_out = pl011_poll_out,
+	.err_check = pl011_err_check,
+#ifdef CONFIG_UART_USE_RUNTIME_CONFIGURE
+	.configure = pl011_runtime_configure,
+	.config_get = pl011_runtime_config_get,
+#endif
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 	.fifo_fill = pl011_fifo_fill,
 	.fifo_read = pl011_fifo_read,
@@ -412,9 +472,24 @@ static int pl011_init(const struct device *dev)
 	const struct pl011_config *config = dev->config;
 	struct pl011_data *data = dev->data;
 	int ret;
-	uint32_t lcrh;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
+
+#if defined(CONFIG_RESET)
+	if (config->reset.dev) {
+		ret = reset_line_toggle_dt(&config->reset);
+		if (ret) {
+			return ret;
+		}
+	}
+#endif
+
+#if defined(CONFIG_CLOCK_CONTROL)
+	if (config->clock_dev) {
+		clock_control_on(config->clock_dev, config->clock_id);
+		clock_control_get_rate(config->clock_dev, config->clock_id, &data->clk_freq);
+	}
+#endif
 
 	/*
 	 * If working in SBSA mode, we assume that UART is already configured,
@@ -428,22 +503,24 @@ static int pl011_init(const struct device *dev)
 			return ret;
 		}
 #endif
+		/* Call vendor-specific function to power on the peripheral */
+		if (config->pwr_on_func != NULL) {
+			ret = config->pwr_on_func();
+		}
+
 		/* disable the uart */
 		pl011_disable(dev);
 		pl011_disable_fifo(dev);
 
-		/* Set baud rate */
-		ret = pl011_set_baudrate(dev, config->sys_clk_freq,
-					 data->baud_rate);
-		if (ret != 0) {
-			return ret;
+		/* Call vendor-specific function to enable clock for the peripheral */
+		if (config->clk_enable_func != NULL) {
+			ret = config->clk_enable_func(dev, data->clk_freq);
+			if (ret) {
+				return ret;
+			}
 		}
 
-		/* Setting the default character format */
-		lcrh = get_uart(dev)->lcr_h & ~(PL011_LCRH_FORMAT_MASK);
-		lcrh &= ~(BIT(0) | BIT(7));
-		lcrh |= PL011_LCRH_WLEN_SIZE(8) << PL011_LCRH_WLEN_SHIFT;
-		get_uart(dev)->lcr_h = lcrh;
+		pl011_runtime_configure_internal(dev, &data->uart_cfg, false);
 
 		/* Setting transmit and receive interrupt FIFO level */
 		get_uart(dev)->ifls = FIELD_PREP(PL011_IFLS_TXIFLSEL_M, TXIFLSEL_1_8_FULL)
@@ -459,7 +536,7 @@ static int pl011_init(const struct device *dev)
 	if (!data->sbsa) {
 		get_uart(dev)->dmacr = 0U;
 		barrier_isync_fence_full();
-		get_uart(dev)->cr &= ~(BIT(14) | BIT(15) | BIT(1));
+		get_uart(dev)->cr &= ~PL011_CR_SIREN;
 		get_uart(dev)->cr |= PL011_CR_RXE | PL011_CR_TXE;
 		barrier_isync_fence_full();
 	}
@@ -474,6 +551,37 @@ static int pl011_init(const struct device *dev)
 	return 0;
 }
 
+#define COMPAT_SPECIFIC_FUNC_NAME(prefix, name) _CONCAT(_CONCAT(prefix, name), _)
+
+/*
+ * The first element of compatible is used to determine the type.
+ * When compatible defines as "ambiq,uart", "arm,pl011",
+ * this macro expands to pwr_on_ambiq_uart_[n].
+ */
+#define COMPAT_SPECIFIC_PWR_ON_FUNC(n)                                                             \
+	_CONCAT(COMPAT_SPECIFIC_FUNC_NAME(pwr_on_, DT_INST_STRING_TOKEN_BY_IDX(n, compatible, 0)), \
+		n)
+
+/*
+ * The first element of compatible is used to determine the type.
+ * When compatible defines as "ambiq,uart", "arm,pl011",
+ * this macro expands to clk_enable_ambiq_uart_[n].
+ */
+#define COMPAT_SPECIFIC_CLK_ENABLE_FUNC(n)                                                         \
+	_CONCAT(COMPAT_SPECIFIC_FUNC_NAME(clk_enable_,                                             \
+					  DT_INST_STRING_TOKEN_BY_IDX(n, compatible, 0)), n)
+
+/*
+ * The first element of compatible is used to determine the type.
+ * When compatible defines as "ambiq,uart", "arm,pl011",
+ * this macro expands to AMBIQ_UART_DEFINE(n).
+ */
+#define COMPAT_SPECIFIC_DEFINE(n)                                                                  \
+	_CONCAT(DT_INST_STRING_UPPER_TOKEN_BY_IDX(n, compatible, 0), _DEFINE)(n)
+
+#define COMPAT_SPECIFIC_CLOCK_CTLR_SUBSYS_CELL(n)                                                  \
+	_CONCAT(DT_INST_STRING_UPPER_TOKEN_BY_IDX(n, compatible, 0), _CLOCK_CTLR_SUBSYS_CELL)
+
 #if defined(CONFIG_PINCTRL)
 #define PINCTRL_DEFINE(n) PINCTRL_DT_INST_DEFINE(n);
 #define PINCTRL_INIT(n) .pincfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),
@@ -481,6 +589,29 @@ static int pl011_init(const struct device *dev)
 #define PINCTRL_DEFINE(n)
 #define PINCTRL_INIT(n)
 #endif /* CONFIG_PINCTRL */
+
+#if defined(CONFIG_RESET)
+#define RESET_INIT(n)                                                                              \
+	IF_ENABLED(DT_INST_NODE_HAS_PROP(0, resets), (.reset = RESET_DT_SPEC_INST_GET(n),))
+#else
+#define RESET_INIT(n)
+#endif
+
+#define CLOCK_INIT(n)                                                                              \
+	COND_CODE_1(DT_NODE_HAS_COMPAT(DT_INST_CLOCKS_CTLR(n), fixed_clock), (),                   \
+		    (.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                           \
+		     .clock_id = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n,                    \
+				  COMPAT_SPECIFIC_CLOCK_CTLR_SUBSYS_CELL(n)),))
+
+#define ARM_PL011_DEFINE(n)                                                                        \
+	static inline int pwr_on_arm_pl011_##n(void)                                               \
+	{                                                                                          \
+		return 0;                                                                          \
+	}                                                                                          \
+	static inline int clk_enable_arm_pl011_##n(const struct device *dev, uint32_t clk)         \
+	{                                                                                          \
+		return 0;                                                                          \
+	}
 
 #ifdef CONFIG_UART_INTERRUPT_DRIVEN
 void pl011_isr(const struct device *dev)
@@ -514,34 +645,45 @@ void pl011_isr(const struct device *dev)
 											\
 	static struct pl011_config pl011_cfg_port_##n = {				\
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(n)),					\
-		.sys_clk_freq = DT_INST_PROP_BY_PHANDLE(n, clocks, clock_frequency),	\
-		PINCTRL_INIT(n)	\
+		CLOCK_INIT(n)                                                           \
+		PINCTRL_INIT(n)	                                                        \
 		.irq_config_func = pl011_irq_config_func_##n,				\
+		.clk_enable_func = COMPAT_SPECIFIC_CLK_ENABLE_FUNC(n),		        \
+		.pwr_on_func = COMPAT_SPECIFIC_PWR_ON_FUNC(n),			        \
 	};
 #else
 #define PL011_CONFIG_PORT(n)								\
 	static struct pl011_config pl011_cfg_port_##n = {				\
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(n)),					\
-		.sys_clk_freq = DT_INST_PROP_BY_PHANDLE(n, clocks, clock_frequency),	\
-		PINCTRL_INIT(n)	\
+		CLOCK_INIT(n)                                                           \
+		PINCTRL_INIT(n)	                                                        \
 	};
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
-#define PL011_INIT(n)						\
-	PINCTRL_DEFINE(n)							\
-	PL011_CONFIG_PORT(n)					\
-								\
-	static struct pl011_data pl011_data_port_##n = {	\
-		.baud_rate = DT_INST_PROP(n, current_speed),	\
-	};							\
-								\
-	DEVICE_DT_INST_DEFINE(n, &pl011_init,			\
-			NULL,					\
-			&pl011_data_port_##n,			\
-			&pl011_cfg_port_##n,			\
-			PRE_KERNEL_1,				\
-			CONFIG_SERIAL_INIT_PRIORITY,		\
-			&pl011_driver_api);
+#define PL011_INIT(n)                                                                              \
+	PINCTRL_DEFINE(n)                                                                          \
+	COMPAT_SPECIFIC_DEFINE(n)                                                                  \
+	PL011_CONFIG_PORT(n)                                                                       \
+                                                                                                   \
+	static struct pl011_data pl011_data_port_##n = {                                           \
+		.uart_cfg =                                                                        \
+			{                                                                          \
+				.baudrate = DT_INST_PROP(n, current_speed),                        \
+				.parity = UART_CFG_PARITY_NONE,                                    \
+				.stop_bits = UART_CFG_STOP_BITS_1,                                 \
+				.data_bits = UART_CFG_DATA_BITS_8,                                 \
+				.flow_ctrl = DT_INST_PROP(n, hw_flow_control)                      \
+						     ? UART_CFG_FLOW_CTRL_RTS_CTS                  \
+						     : UART_CFG_FLOW_CTRL_NONE,                    \
+			},                                                                         \
+		.clk_freq =                                                                        \
+			COND_CODE_1(DT_NODE_HAS_COMPAT(DT_INST_CLOCKS_CTLR(n), fixed_clock),       \
+				    (DT_INST_PROP_BY_PHANDLE(n, clocks, clock_frequency)), (0)),   \
+	};                                                                                         \
+                                                                                                   \
+	DEVICE_DT_INST_DEFINE(n, pl011_init, PM_INST_GET(n), &pl011_data_port_##n,       \
+			      &pl011_cfg_port_##n, PRE_KERNEL_1, CONFIG_SERIAL_INIT_PRIORITY,      \
+			      &pl011_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(PL011_INIT)
 
@@ -576,7 +718,7 @@ DT_INST_FOREACH_STATUS_OKAY(PL011_INIT)
 		.sbsa = true,					\
 	};							\
 								\
-	DEVICE_DT_INST_DEFINE(n, &pl011_init,			\
+	DEVICE_DT_INST_DEFINE(n, pl011_init,			\
 			NULL,					\
 			&pl011_data_sbsa_##n,			\
 			&pl011_cfg_sbsa_##n,			\

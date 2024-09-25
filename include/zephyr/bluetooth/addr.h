@@ -108,8 +108,8 @@ static inline int bt_addr_le_cmp(const bt_addr_le_t *a, const bt_addr_le_t *b)
 
 /** @brief Determine equality of two Bluetooth LE device addresses.
  *
- *  The Bluetooth LE addresses are equal iff both the types and the 48-bit
- *  addresses are numerically equal.
+ *  The Bluetooth LE addresses are equal if and only if both the types and
+ *  the 48-bit addresses are numerically equal.
  *
  *  @retval #true if the two addresses are equal
  *  @retval #false otherwise
@@ -272,7 +272,8 @@ static inline int bt_addr_le_to_str(const bt_addr_le_t *addr, char *str,
  *  @param[in]  str   The string representation of a Bluetooth address.
  *  @param[out] addr  Address of buffer to store the Bluetooth address
  *
- *  @return Zero on success or (negative) error code otherwise.
+ *  @retval 0 Success. The parsed address is stored in @p addr.
+ *  @return -EINVAL Invalid address string. @p str is not a well-formed Bluetooth address.
  */
 int bt_addr_from_str(const char *str, bt_addr_t *addr);
 

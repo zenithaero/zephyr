@@ -1,7 +1,8 @@
-.. _th02-sample:
+.. zephyr:code-sample:: th02
+   :name: TH02 Temperature and Humidity Sensor
+   :relevant-api: sensor_interface
 
-TH02: Temperature and Humidity Monitor
-######################################
+   Get temperature and humidity data from a TH02 sensor (polling mode).
 
 Overview
 ********
@@ -26,7 +27,7 @@ Wiring
 
 The easiest way to get this wired is to use the Grove shield and connect both
 devices to I2C. No additional wiring is required. Depending on the board you are
-using you might need to connect two 10K ohm resistors to SDL and and SDA (I2C).
+using you might need to connect two 10K ohm resistors to SDL and SDA (I2C).
 The LCD display requires 5 volts, so the voltage switch on the shield needs to
 be on 5v.
 

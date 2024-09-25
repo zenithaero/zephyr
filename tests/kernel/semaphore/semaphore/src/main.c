@@ -8,6 +8,14 @@
 #include <zephyr/irq_offload.h>
 #include <zephyr/ztest_error_hook.h>
 
+
+/**
+ * @defgroup kernel_semaphore_tests Semaphores
+ * @ingroup all_tests
+ * @{
+ * @}
+ */
+
 /* Macro declarations */
 #define SEM_INIT_VAL (0U)
 #define SEM_MAX_VAL  (10U)
@@ -79,7 +87,7 @@ struct k_thread sem_tid_1, sem_tid_2, sem_tid_3, sem_tid_4;
 struct k_thread multiple_tid[TOTAL_THREADS_WAITING];
 
 K_SEM_DEFINE(ksema, SEM_INIT_VAL, SEM_MAX_VAL);
-struct k_sem sema, mut_sem;
+struct k_sem msg_sema, mut_sem;
 static K_THREAD_STACK_DEFINE(tstack, STACK_SIZE);
 struct k_thread tdata;
 
@@ -247,9 +255,9 @@ ZTEST_USER(semaphore, test_k_sem_define)
 ZTEST_USER(semaphore, test_sem_thread2thread)
 {
 	/**TESTPOINT: test k_sem_init sema*/
-	expect_k_sem_init_nomsg(&sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
 
-	tsema_thread_thread(&sema);
+	tsema_thread_thread(&msg_sema);
 
 	/**TESTPOINT: test K_SEM_DEFINE sema*/
 	tsema_thread_thread(&ksema);
@@ -262,16 +270,16 @@ ZTEST_USER(semaphore, test_sem_thread2thread)
 ZTEST(semaphore, test_sem_thread2isr)
 {
 	/**TESTPOINT: test k_sem_init sema*/
-	expect_k_sem_init_nomsg(&sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
 
-	tsema_thread_isr(&sema);
+	tsema_thread_isr(&msg_sema);
 
 	/**TESTPOINT: test K_SEM_DEFINE sema*/
 	tsema_thread_isr(&ksema);
 }
 
 /**
- * @brief Test semaphore initialization at running time
+ * @brief Test semaphore initialization at runtime
  * @details
  * - Initialize a semaphore with valid count and max limit.
  * - Initialize a semaphore with invalid max limit.
@@ -281,15 +289,15 @@ ZTEST(semaphore, test_sem_thread2isr)
 ZTEST_USER(semaphore, test_k_sem_init)
 {
 	/* initialize a semaphore with valid count and max limit */
-	expect_k_sem_init_nomsg(&sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
 
-	k_sem_reset(&sema);
+	k_sem_reset(&msg_sema);
 
 	/* initialize a semaphore with invalid max limit */
-	expect_k_sem_init_nomsg(&sema, SEM_INIT_VAL, 0, -EINVAL);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_INIT_VAL, 0, -EINVAL);
 
 	/* initialize a semaphore with invalid count */
-	expect_k_sem_init_nomsg(&sema, SEM_MAX_VAL + 1, SEM_MAX_VAL, -EINVAL);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_MAX_VAL + 1, SEM_MAX_VAL, -EINVAL);
 }
 
 
@@ -299,27 +307,27 @@ ZTEST_USER(semaphore, test_k_sem_init)
  */
 ZTEST_USER(semaphore, test_sem_reset)
 {
-	expect_k_sem_init_nomsg(&sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
-	expect_k_sem_count_get_nomsg(&sema, 0);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
+	expect_k_sem_count_get_nomsg(&msg_sema, 0);
 
-	k_sem_give(&sema);
-	expect_k_sem_count_get_nomsg(&sema, 1);
-	k_sem_reset(&sema);
-	expect_k_sem_count_get_nomsg(&sema, 0);
+	k_sem_give(&msg_sema);
+	expect_k_sem_count_get_nomsg(&msg_sema, 1);
+	k_sem_reset(&msg_sema);
+	expect_k_sem_count_get_nomsg(&msg_sema, 0);
 
 	/**TESTPOINT: semaphore take return -EBUSY*/
-	expect_k_sem_take_nomsg(&sema, K_NO_WAIT, -EBUSY);
-	expect_k_sem_count_get_nomsg(&sema, 0);
+	expect_k_sem_take_nomsg(&msg_sema, K_NO_WAIT, -EBUSY);
+	expect_k_sem_count_get_nomsg(&msg_sema, 0);
 
 	/**TESTPOINT: semaphore take return -EAGAIN*/
-	expect_k_sem_take_nomsg(&sema, SEM_TIMEOUT, -EAGAIN);
-	expect_k_sem_count_get_nomsg(&sema, 0);
+	expect_k_sem_take_nomsg(&msg_sema, SEM_TIMEOUT, -EAGAIN);
+	expect_k_sem_count_get_nomsg(&msg_sema, 0);
 
-	k_sem_give(&sema);
-	expect_k_sem_count_get_nomsg(&sema, 1);
+	k_sem_give(&msg_sema);
+	expect_k_sem_count_get_nomsg(&msg_sema, 1);
 
-	expect_k_sem_take_nomsg(&sema, K_FOREVER, 0);
-	expect_k_sem_count_get_nomsg(&sema, 0);
+	expect_k_sem_take_nomsg(&msg_sema, K_FOREVER, 0);
+	expect_k_sem_count_get_nomsg(&msg_sema, 0);
 }
 
 ZTEST_USER(semaphore, test_sem_reset_waiting)
@@ -353,22 +361,22 @@ ZTEST_USER(semaphore, test_sem_reset_waiting)
  */
 ZTEST_USER(semaphore, test_sem_count_get)
 {
-	expect_k_sem_init_nomsg(&sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
+	expect_k_sem_init_nomsg(&msg_sema, SEM_INIT_VAL, SEM_MAX_VAL, 0);
 
 	/**TESTPOINT: semaphore count get upon init*/
-	expect_k_sem_count_get_nomsg(&sema, SEM_INIT_VAL);
-	k_sem_give(&sema);
+	expect_k_sem_count_get_nomsg(&msg_sema, SEM_INIT_VAL);
+	k_sem_give(&msg_sema);
 	/**TESTPOINT: sem count get after give*/
-	expect_k_sem_count_get_nomsg(&sema, SEM_INIT_VAL + 1);
-	expect_k_sem_take_nomsg(&sema, K_FOREVER, 0);
+	expect_k_sem_count_get_nomsg(&msg_sema, SEM_INIT_VAL + 1);
+	expect_k_sem_take_nomsg(&msg_sema, K_FOREVER, 0);
 	/**TESTPOINT: sem count get after take*/
 	for (int i = 0; i < SEM_MAX_VAL; i++) {
-		expect_k_sem_count_get_nomsg(&sema, SEM_INIT_VAL + i);
-		k_sem_give(&sema);
+		expect_k_sem_count_get_nomsg(&msg_sema, SEM_INIT_VAL + i);
+		k_sem_give(&msg_sema);
 	}
 	/**TESTPOINT: semaphore give above limit*/
-	k_sem_give(&sema);
-	expect_k_sem_count_get_nomsg(&sema, SEM_MAX_VAL);
+	k_sem_give(&msg_sema);
+	expect_k_sem_count_get_nomsg(&msg_sema, SEM_MAX_VAL);
 }
 
 
@@ -565,7 +573,7 @@ ZTEST_USER(semaphore, test_sem_take_timeout_forever)
  * @brief Test k_sem_take() with timeout in ISR context
  * @see k_sem_take()
  */
-ZTEST(semaphore, test_sem_take_timeout_isr)
+ZTEST(semaphore_1cpu, test_sem_take_timeout_isr)
 {
 	/*
 	 * Signal the semaphore upon which the another thread is waiting.  The
@@ -1150,6 +1158,10 @@ ZTEST(semaphore_1cpu, test_sem_queue_mutual_exclusion)
 #ifdef CONFIG_USERSPACE
 static void thread_sem_give_null(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	ztest_set_fault_valid(true);
 	k_sem_give(NULL);
 
@@ -1169,7 +1181,7 @@ static void thread_sem_give_null(void *p1, void *p2, void *p3)
 ZTEST_USER(semaphore_null_case, test_sem_give_null)
 {
 	k_tid_t tid = k_thread_create(&tdata, tstack, STACK_SIZE,
-			(k_thread_entry_t)thread_sem_give_null,
+			thread_sem_give_null,
 			NULL, NULL, NULL,
 			K_PRIO_PREEMPT(THREAD_TEST_PRIORITY),
 			K_USER | K_INHERIT_PERMS, K_NO_WAIT);
@@ -1181,6 +1193,10 @@ ZTEST_USER(semaphore_null_case, test_sem_give_null)
 #ifdef CONFIG_USERSPACE
 static void thread_sem_init_null(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	ztest_set_fault_valid(true);
 	k_sem_init(NULL, 0, 1);
 
@@ -1200,7 +1216,7 @@ static void thread_sem_init_null(void *p1, void *p2, void *p3)
 ZTEST_USER(semaphore_null_case, test_sem_init_null)
 {
 	k_tid_t tid = k_thread_create(&tdata, tstack, STACK_SIZE,
-			(k_thread_entry_t)thread_sem_init_null,
+			thread_sem_init_null,
 			NULL, NULL, NULL,
 			K_PRIO_PREEMPT(THREAD_TEST_PRIORITY),
 			K_USER | K_INHERIT_PERMS, K_NO_WAIT);
@@ -1212,6 +1228,10 @@ ZTEST_USER(semaphore_null_case, test_sem_init_null)
 #ifdef CONFIG_USERSPACE
 static void thread_sem_take_null(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	ztest_set_fault_valid(true);
 	k_sem_take(NULL, K_MSEC(1));
 
@@ -1231,7 +1251,7 @@ static void thread_sem_take_null(void *p1, void *p2, void *p3)
 ZTEST_USER(semaphore_null_case, test_sem_take_null)
 {
 	k_tid_t tid = k_thread_create(&tdata, tstack, STACK_SIZE,
-			(k_thread_entry_t)thread_sem_take_null,
+			thread_sem_take_null,
 			NULL, NULL, NULL,
 			K_PRIO_PREEMPT(THREAD_TEST_PRIORITY),
 			K_USER | K_INHERIT_PERMS, K_NO_WAIT);
@@ -1243,6 +1263,10 @@ ZTEST_USER(semaphore_null_case, test_sem_take_null)
 #ifdef CONFIG_USERSPACE
 static void thread_sem_reset_null(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	ztest_set_fault_valid(true);
 	k_sem_reset(NULL);
 
@@ -1262,7 +1286,7 @@ static void thread_sem_reset_null(void *p1, void *p2, void *p3)
 ZTEST_USER(semaphore_null_case, test_sem_reset_null)
 {
 	k_tid_t tid = k_thread_create(&tdata, tstack, STACK_SIZE,
-			(k_thread_entry_t)thread_sem_reset_null,
+			thread_sem_reset_null,
 			NULL, NULL, NULL,
 			K_PRIO_PREEMPT(THREAD_TEST_PRIORITY),
 			K_USER | K_INHERIT_PERMS, K_NO_WAIT);
@@ -1274,6 +1298,10 @@ ZTEST_USER(semaphore_null_case, test_sem_reset_null)
 #ifdef CONFIG_USERSPACE
 static void thread_sem_count_get_null(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
 	ztest_set_fault_valid(true);
 	k_sem_count_get(NULL);
 
@@ -1293,7 +1321,7 @@ static void thread_sem_count_get_null(void *p1, void *p2, void *p3)
 ZTEST_USER(semaphore_null_case, test_sem_count_get_null)
 {
 	k_tid_t tid = k_thread_create(&tdata, tstack, STACK_SIZE,
-			(k_thread_entry_t)thread_sem_count_get_null,
+			thread_sem_count_get_null,
 			NULL, NULL, NULL,
 			K_PRIO_PREEMPT(THREAD_TEST_PRIORITY),
 			K_USER | K_INHERIT_PERMS, K_NO_WAIT);
@@ -1307,7 +1335,7 @@ void *test_init(void)
 #ifdef CONFIG_USERSPACE
 	k_thread_access_grant(k_current_get(),
 			      &simple_sem, &multiple_thread_sem, &low_prio_sem,
-				  &mid_prio_sem, &high_prio_sem, &ksema, &sema,
+				  &mid_prio_sem, &high_prio_sem, &ksema, &msg_sema,
 				  &high_prio_long_sem, &stack_1, &stack_2,
 				  &stack_3, &stack_4, &timeout_info_pipe,
 				  &sem_tid_1, &sem_tid_2, &sem_tid_3,

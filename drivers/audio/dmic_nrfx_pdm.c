@@ -39,7 +39,7 @@ struct dmic_nrfx_pdm_drv_cfg {
 
 static void free_buffer(struct dmic_nrfx_pdm_drv_data *drv_data, void *buffer)
 {
-	k_mem_slab_free(drv_data->mem_slab, &buffer);
+	k_mem_slab_free(drv_data->mem_slab, buffer);
 	LOG_DBG("Freed buffer %p", buffer);
 }
 
@@ -207,7 +207,7 @@ static bool check_pdm_frequencies(const struct dmic_nrfx_pdm_drv_cfg *drv_cfg,
 				better_found = true;
 			}
 
-			/* Since frequencies are are in ascending order, stop
+			/* Since frequencies are in ascending order, stop
 			 * checking next ones for the current ratio after
 			 * resulting PCM rate goes above the one requested.
 			 */

@@ -7,7 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/__assert.h>
-#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
+#include <cmsis_core.h>
 #include <zephyr/sys/barrier.h>
 
 #if !defined(CONFIG_CPU_CORTEX_M)
@@ -36,7 +36,7 @@ void arm_isr_handler(const void *args)
 	test_flag++;
 }
 
-void k_sys_fatal_error_handler(unsigned int reason, const z_arch_esf_t *pEsf)
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *pEsf)
 {
 	printk("Caught system error -- reason %d\n", reason);
 
@@ -59,8 +59,8 @@ void test_main(void)
 	printk("ARM no-multithreading test\n");
 
 	uint32_t psp = (uint32_t)__get_PSP();
-	uint32_t main_stack_base = (uint32_t)Z_THREAD_STACK_BUFFER(z_main_stack);
-	uint32_t main_stack_top = (uint32_t)(Z_THREAD_STACK_BUFFER(z_main_stack) +
+	uint32_t main_stack_base = (uint32_t)K_THREAD_STACK_BUFFER(z_main_stack);
+	uint32_t main_stack_top = (uint32_t)(K_THREAD_STACK_BUFFER(z_main_stack) +
 		K_THREAD_STACK_SIZEOF(z_main_stack));
 
 	__ASSERT(

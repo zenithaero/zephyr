@@ -23,7 +23,7 @@
 #include <zephyr/toolchain/common.h>
 #include <zephyr/linker/sections.h>
 #include <zephyr/sys/util.h>
-#include <offsets.h>
+#include <zephyr/offsets.h>
 
 /* We need to dummy out DT_NODE_HAS_STATUS when building the unittests.
  * Including devicetree.h would require generating dummy header files
@@ -133,6 +133,7 @@ extern char _flash_used[];
 /* datas, bss, noinit */
 extern char _image_ram_start[];
 extern char _image_ram_end[];
+extern char _image_ram_size[];
 
 extern char __text_region_start[];
 extern char __text_region_end[];
@@ -158,7 +159,7 @@ extern char __gcov_bss_size[];
 /* end address of image, used by newlib for the heap */
 extern char _end[];
 
-#if DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ccm), okay)
+#if (DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ccm), okay))
 extern char __ccm_data_rom_start[];
 extern char __ccm_start[];
 extern char __ccm_data_start[];
@@ -170,14 +171,14 @@ extern char __ccm_noinit_end[];
 extern char __ccm_end[];
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_itcm), okay)
+#if (DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_itcm), okay))
 extern char __itcm_start[];
 extern char __itcm_end[];
 extern char __itcm_size[];
 extern char __itcm_load_start[];
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_dtcm), okay)
+#if (DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_dtcm), okay))
 extern char __dtcm_data_start[];
 extern char __dtcm_data_end[];
 extern char __dtcm_bss_start[];
@@ -189,7 +190,7 @@ extern char __dtcm_start[];
 extern char __dtcm_end[];
 #endif
 
-#if DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ocm), okay)
+#if (DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ocm), okay))
 extern char __ocm_data_start[];
 extern char __ocm_data_end[];
 extern char __ocm_bss_start[];
@@ -291,7 +292,7 @@ extern char lnkr_boot_noinit_size[];
 /* lnkr_pinned_start[] and lnkr_pinned_end[] must encapsulate
  * all the pinned sections as these are used by
  * the MMU code to mark the physical page frames with
- * Z_PAGE_FRAME_PINNED.
+ * K_MEM_PAGE_FRAME_PINNED.
  */
 extern char lnkr_pinned_start[];
 extern char lnkr_pinned_end[];
@@ -336,6 +337,24 @@ static inline bool lnkr_is_region_pinned(uint8_t *addr, size_t sz)
 
 #endif /* CONFIG_LINKER_USE_PINNED_SECTION */
 
+#ifdef CONFIG_LINKER_USE_ONDEMAND_SECTION
+/* lnkr_ondemand_start[] and lnkr_ondemand_end[] must encapsulate
+ * all the on-demand sections as these are used by
+ * the MMU code to mark the virtual pages with the appropriate backing store
+ * location token to have them be paged in on demand.
+ */
+extern char lnkr_ondemand_start[];
+extern char lnkr_ondemand_end[];
+extern char lnkr_ondemand_load_start[];
+
+extern char lnkr_ondemand_text_start[];
+extern char lnkr_ondemand_text_end[];
+extern char lnkr_ondemand_text_size[];
+extern char lnkr_ondemand_rodata_start[];
+extern char lnkr_ondemand_rodata_end[];
+extern char lnkr_ondemand_rodata_size[];
+
+#endif /* CONFIG_LINKER_USE_ONDEMAND_SECTION */
 #endif /* ! _ASMLANGUAGE */
 
 #endif /* ZEPHYR_INCLUDE_LINKER_LINKER_DEFS_H_ */

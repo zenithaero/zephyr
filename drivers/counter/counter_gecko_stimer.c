@@ -18,10 +18,20 @@
 #include <em_cmu.h>
 #include <sl_atomic.h>
 #include <sl_sleeptimer.h>
+#include <sli_sleeptimer_hal.h>
 
 LOG_MODULE_REGISTER(counter_gecko, CONFIG_COUNTER_LOG_LEVEL);
 
-#define STIMER_MAX_VALUE (_RTCC_CNT_MASK)
+#if SL_SLEEPTIMER_PERIPHERAL == SL_SLEEPTIMER_PERIPHERAL_RTCC
+#define STIMER_IRQ_HANDLER RTCC_IRQHandler
+#define STIMER_MAX_VALUE _RTCC_CNT_MASK
+#elif SL_SLEEPTIMER_PERIPHERAL == SL_SLEEPTIMER_PERIPHERAL_SYSRTC
+#define STIMER_IRQ_HANDLER SYSRTC_APP_IRQHandler
+#define STIMER_MAX_VALUE _SYSRTC_CNT_MASK
+#else
+#error "Unsupported sleep timer peripheral"
+#endif
+
 #define STIMER_ALARM_NUM 2
 
 struct counter_gecko_config {
@@ -100,8 +110,9 @@ static int counter_gecko_start(const struct device *dev)
 	bool is_top_timer_running = false;
 
 	error_code = sl_sleeptimer_is_timer_running(&top_timer, &is_top_timer_running);
-	if ((error_code == SL_STATUS_OK) && (is_top_timer_running == true))
+	if ((error_code == SL_STATUS_OK) && (is_top_timer_running == true)) {
 		return 0;
+	}
 	struct counter_gecko_data *const dev_data = (struct counter_gecko_data *const)(dev)->data;
 
 	error_code = sl_sleeptimer_start_timer(&top_timer, dev_data->top_data.ticks, top_callback,
@@ -270,7 +281,7 @@ BUILD_ASSERT((DT_INST_PROP(0, prescaler) > 0U) && (DT_INST_PROP(0, prescaler) <=
 
 static void counter_gecko_0_irq_config(void)
 {
-	IRQ_DIRECT_CONNECT(DT_INST_IRQN(0), DT_INST_IRQ(0, priority), RTCC_IRQHandler, 0);
+	IRQ_DIRECT_CONNECT(DT_INST_IRQN(0), DT_INST_IRQ(0, priority), STIMER_IRQ_HANDLER, 0);
 	irq_enable(DT_INST_IRQN(0));
 }
 

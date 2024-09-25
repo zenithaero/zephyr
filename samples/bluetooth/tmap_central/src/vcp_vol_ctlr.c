@@ -1,14 +1,22 @@
 /*
  * Copyright 2023 NXP
+ * Copyright (c) 2024 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/bluetooth/bluetooth.h>
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <zephyr/bluetooth/audio/audio.h>
 #include <zephyr/bluetooth/audio/vcp.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/sys/printk.h>
 
-static struct bt_vcp_vol_ctlr *vol_ctlr;
+static struct bt_vcp_vol_ctlr *vcp_vol_ctlr;
 
 static void vcs_discover_cb(struct bt_vcp_vol_ctlr *vol_ctlr, int err,
 			    uint8_t vocs_count, uint8_t aics_count)
@@ -66,7 +74,7 @@ static int process_profile_connection(struct bt_conn *conn)
 {
 	int err = 0;
 
-	err = bt_vcp_vol_ctlr_discover(conn, &vol_ctlr);
+	err = bt_vcp_vol_ctlr_discover(conn, &vcp_vol_ctlr);
 
 	if (err != 0) {
 		printk("bt_vcp_vol_ctlr_discover (err %d)\n", err);
@@ -78,7 +86,7 @@ static int process_profile_connection(struct bt_conn *conn)
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
-		printk("Connection failed (err %d)\n", err);
+		printk("Connection failed, err %d %s\n", err, bt_hci_err_to_str(err));
 		return;
 	}
 
@@ -107,8 +115,8 @@ int vcp_vol_ctlr_mute(void)
 {
 	int err;
 
-	if (vol_ctlr != NULL) {
-		err = bt_vcp_vol_ctlr_mute(vol_ctlr);
+	if (vcp_vol_ctlr != NULL) {
+		err = bt_vcp_vol_ctlr_mute(vcp_vol_ctlr);
 	} else {
 		err = -EINVAL;
 	}
@@ -120,8 +128,8 @@ int vcp_vol_ctlr_unmute(void)
 {
 	int err;
 
-	if (vol_ctlr != NULL) {
-		err = bt_vcp_vol_ctlr_unmute(vol_ctlr);
+	if (vcp_vol_ctlr != NULL) {
+		err = bt_vcp_vol_ctlr_unmute(vcp_vol_ctlr);
 	} else {
 		err = -EINVAL;
 	}
@@ -133,8 +141,8 @@ int vcp_vol_ctlr_set_vol(uint8_t volume)
 {
 	int err;
 
-	if (vol_ctlr != NULL) {
-		err = bt_vcp_vol_ctlr_set_vol(vol_ctlr, volume);
+	if (vcp_vol_ctlr != NULL) {
+		err = bt_vcp_vol_ctlr_set_vol(vcp_vol_ctlr, volume);
 	} else {
 		err = -EINVAL;
 	}

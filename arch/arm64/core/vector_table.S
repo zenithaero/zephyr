@@ -10,7 +10,7 @@
 
 #include <zephyr/toolchain.h>
 #include <zephyr/linker/sections.h>
-#include <offsets.h>
+#include <zephyr/offsets.h>
 #include <zephyr/arch/cpu.h>
 #include <zephyr/arch/arm64/tpidrro_el0.h>
 #include <offsets_short.h>
@@ -70,6 +70,10 @@ _ASM_FILE_PROLOGUE
 	stp	x18, lr, [sp, ___esf_t_x18_lr_OFFSET]
 #ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
 	.endif
+#endif
+
+#ifdef CONFIG_FRAME_POINTER
+	str	x29, [sp, ___esf_t_fp_OFFSET]
 #endif
 
 	mrs	\xreg0, spsr_el1
@@ -334,6 +338,10 @@ SECTION_FUNC(TEXT, z_arm64_exit_exc)
 	ldp	x14, x15, [sp, ___esf_t_x14_x15_OFFSET]
 	ldp	x16, x17, [sp, ___esf_t_x16_x17_OFFSET]
 	ldp	x18, lr, [sp, ___esf_t_x18_lr_OFFSET]
+
+#ifdef CONFIG_FRAME_POINTER
+	ldr	x29, [sp,  ___esf_t_fp_OFFSET]
+#endif
 
 	add	sp, sp, ___esf_t_SIZEOF
 

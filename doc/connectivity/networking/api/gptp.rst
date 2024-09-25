@@ -40,7 +40,7 @@ Boards supported:
 - :ref:`nucleo_h745zi_q_board`
 - :ref:`nucleo_f767zi_board`
 - :ref:`sam_e70_xplained`
-- :ref:`native_posix` (only usable for simple testing, limited capabilities
+- :ref:`native_sim` (only usable for simple testing, limited capabilities
   due to lack of hardware clock)
 - :ref:`qemu_x86` (emulated, limited capabilities due to lack of hardware clock)
 
@@ -54,11 +54,12 @@ The following configuration option must me enabled in :file:`prj.conf` file.
 Application interfaces
 **********************
 
-Only two Application Interfaces as defined in section 9 of the standard
+The following Application Interfaces as defined in section 9 of the standard
 are available:
 
+- ``ClockSourceTime`` interface (:c:func:`gptp_clk_src_time_invoke`)
 - ``ClockTargetPhaseDiscontinuity`` interface (:c:func:`gptp_register_phase_dis_cb`)
-- ``ClockTargetEventCapture`` interface  (:c:func:`gptp_event_capture`)
+- ``ClockTargetEventCapture`` interface (:c:func:`gptp_event_capture`)
 
 Testing
 *******
@@ -66,7 +67,7 @@ Testing
 The stack has been informally tested using the
 `OpenAVnu gPTP <https://github.com/AVnu/gptp>`_ and
 `Linux ptp4l <http://linuxptp.sourceforge.net/>`_ daemons.
-The :ref:`gPTP sample application <gptp-sample>` from the Zephyr
+The :zephyr:code-sample:`gPTP sample application <gptp>` from the Zephyr
 source distribution can be used for testing.
 
 .. _IEEE 802.1AS-2011 standard:

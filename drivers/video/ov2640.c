@@ -5,16 +5,15 @@
  */
 
 #define DT_DRV_COMPAT ovti_ov2640
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-
+#include <zephyr/logging/log.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/gpio.h>
 
-#define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(ov2640);
+LOG_MODULE_REGISTER(video_ov2640, CONFIG_VIDEO_LOG_LEVEL);
 
 /* DSP register bank FF=0x00*/
 #define QS                  0x44
@@ -108,6 +107,7 @@ LOG_MODULE_REGISTER(ov2640);
 #define REG04_DEFAULT       0x28
 #define REG04_HFLIP_IMG     0x80
 #define REG04_VFLIP_IMG     0x40
+#define REG04_VREF_EN       0x10
 #define REG04_HREF_EN       0x08
 #define REG04_SET(x)        (REG04_DEFAULT | x)
 
@@ -435,6 +435,7 @@ struct ov2640_config {
 #if DT_INST_NODE_HAS_PROP(0, reset_gpios)
 	struct gpio_dt_spec reset_gpio;
 #endif
+	uint8_t clock_rate_control;
 };
 
 struct ov2640_data {
@@ -456,6 +457,7 @@ static const struct video_format_cap fmts[] = {
 	OV2640_VIDEO_FORMAT_CAP(160, 120, VIDEO_PIX_FMT_RGB565),   /* QQVGA */
 	OV2640_VIDEO_FORMAT_CAP(176, 144, VIDEO_PIX_FMT_RGB565),   /* QCIF  */
 	OV2640_VIDEO_FORMAT_CAP(240, 160, VIDEO_PIX_FMT_RGB565),   /* HQVGA */
+	OV2640_VIDEO_FORMAT_CAP(240, 240, VIDEO_PIX_FMT_RGB565),   /* 240x240 */
 	OV2640_VIDEO_FORMAT_CAP(320, 240, VIDEO_PIX_FMT_RGB565),   /* QVGA  */
 	OV2640_VIDEO_FORMAT_CAP(352, 288, VIDEO_PIX_FMT_RGB565),   /* CIF   */
 	OV2640_VIDEO_FORMAT_CAP(640, 480, VIDEO_PIX_FMT_RGB565),   /* VGA   */
@@ -790,9 +792,9 @@ static int ov2640_set_vertical_flip(const struct device *dev, int enable)
 	reg = ov2640_read_reg(&cfg->i2c, REG04);
 
 	if (enable) {
-		reg |= REG04_VFLIP_IMG;
+		reg |= REG04_VFLIP_IMG | REG04_VREF_EN;
 	} else {
-		reg &= ~REG04_VFLIP_IMG;
+		reg &= ~(REG04_VFLIP_IMG | REG04_VREF_EN);
 	}
 
 	ret |= ov2640_write_reg(&cfg->i2c, REG04, reg);
@@ -821,7 +823,7 @@ static int ov2640_set_resolution(const struct device *dev,
 
 	/* Set CLKRC */
 	ret |= ov2640_write_reg(&cfg->i2c, BANK_SEL, BANK_SEL_SENSOR);
-	ret |= ov2640_write_reg(&cfg->i2c, CLKRC, 0x87);
+	ret |= ov2640_write_reg(&cfg->i2c, CLKRC, cfg->clock_rate_control);
 
 	/* Write DSP input registers */
 	ov2640_write_all(dev, uxga_regs, ARRAY_SIZE(uxga_regs));
@@ -1030,6 +1032,7 @@ static const struct ov2640_config ov2640_cfg_0 = {
 #if DT_INST_NODE_HAS_PROP(0, reset_gpios)
 	.reset_gpio = GPIO_DT_SPEC_INST_GET(0, reset_gpios),
 #endif
+	.clock_rate_control = DT_INST_PROP(0, clock_rate_control),
 };
 static struct ov2640_data ov2640_data_0;
 
@@ -1043,7 +1046,7 @@ static int ov2640_init_0(const struct device *dev)
 	}
 
 #if DT_INST_NODE_HAS_PROP(0, reset_gpios)
-	if (!device_is_ready(cfg->reset_gpio.port)) {
+	if (!gpio_is_ready_dt(&cfg->reset_gpio)) {
 		LOG_ERR("%s: device %s is not ready", dev->name,
 				cfg->reset_gpio.port->name);
 		return -ENODEV;

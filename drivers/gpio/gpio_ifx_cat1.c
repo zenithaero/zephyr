@@ -59,7 +59,15 @@ struct gpio_cat1_data {
 
 /* Map port number to device object */
 static const struct device *const port_dev_obj[IOSS_GPIO_GPIO_PORT_NR] = {
-	LISTIFY(15, GET_DEV_OBJ_FROM_LIST, (,))
+	/* the integer used as the first variable in listify is equivalent to
+	 * IOSS_GPIO_GPIO_PORT_NR for the respective categories, but using
+	 * the macro in LISTIFY causes build failures
+	 */
+	#if CONFIG_SOC_FAMILY_INFINEON_CAT1A
+		LISTIFY(15, GET_DEV_OBJ_FROM_LIST, (,))
+	#elif CONFIG_SOC_FAMILY_INFINEON_CAT1B
+		LISTIFY(6, GET_DEV_OBJ_FROM_LIST, (,))
+	#endif
 };
 
 static int gpio_cat1_configure(const struct device *dev,
@@ -104,8 +112,10 @@ static int gpio_cat1_configure(const struct device *dev,
 		break;
 
 	case GPIO_DISCONNECTED:
-		cyhal_gpio_free(gpio_pin);
-		return 0;
+		/* Handle this after calling cyhal_gpio_init(), otherwise it will cause an assert
+		 * from HAL for freeing an uninitialized pin
+		 */
+		break;
 
 	default:
 		return -ENOTSUP;
@@ -121,7 +131,12 @@ static int gpio_cat1_configure(const struct device *dev,
 		status = cyhal_gpio_init(gpio_pin, gpio_dir, gpio_mode, pin_val);
 	}
 
+	if (flags & GPIO_DISCONNECTED) {
+		cyhal_gpio_free(gpio_pin);
+	}
+
 	return (status == CY_RSLT_SUCCESS) ? 0 : -EIO;
+
 }
 
 static int gpio_cat1_port_get_raw(const struct device *dev,

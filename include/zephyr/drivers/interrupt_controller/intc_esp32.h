@@ -45,6 +45,17 @@
 				 ESP_INTR_FLAG_NMI)
 
 /*
+ * Get the interrupt flags from the supplied priority.
+ */
+#define ESP_PRIO_TO_FLAGS(priority) \
+	((priority) > 0 ? ((1 << (priority)) & ESP_INTR_FLAG_LEVELMASK) : 0)
+
+/*
+ * Check interrupt flags from input and filter unallowed values.
+ */
+#define ESP_INT_FLAGS_CHECK(int_flags) ((int_flags) & ESP_INTR_FLAG_SHARED)
+
+/*
  * The esp_intr_alloc* functions can allocate an int for all *_INTR_SOURCE int sources that
  * are routed through the interrupt mux. Apart from these sources, each core also has some internal
  * sources that do not pass through the interrupt mux. To allocate an interrupt for these sources,
@@ -249,7 +260,7 @@ int esp_intr_get_intno(struct intr_handle_data_t *handle);
  * @brief Disable the interrupt associated with the handle
  *
  * @note
- * 1. For local interrupts (ESP_INTERNAL_* sources), this function has to be called on the
+ * 1. For local interrupts (``ESP_INTERNAL_*`` sources), this function has to be called on the
  * CPU the interrupt is allocated on. Other interrupts have no such restriction.
  * 2. When several handlers sharing a same interrupt source, interrupt status bits, which are
  * handled in the handler to be disabled, should be masked before the disabling, or handled
@@ -266,7 +277,7 @@ int esp_intr_disable(struct intr_handle_data_t *handle);
 /**
  * @brief Enable the interrupt associated with the handle
  *
- * @note For local interrupts (ESP_INTERNAL_* sources), this function has to be called on the
+ * @note For local interrupts (``ESP_INTERNAL_*`` sources), this function has to be called on the
  *       CPU the interrupt is allocated on. Other interrupts have no such restriction.
  *
  * @param handle The handle, as obtained by esp_intr_alloc or esp_intr_alloc_intrstatus
@@ -294,7 +305,6 @@ int esp_intr_set_in_iram(struct intr_handle_data_t *handle, bool is_in_iram);
  * @brief Disable interrupts that aren't specifically marked as running from IRAM
  */
 void esp_intr_noniram_disable(void);
-
 
 /**
  * @brief Re-enable interrupts disabled by esp_intr_noniram_disable

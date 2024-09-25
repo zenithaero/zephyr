@@ -23,10 +23,10 @@ application and open the :file:`zephyr.dts` file in the build directory.
 
 .. tip::
 
-   You can build :ref:`hello_world` to see the "base" devicetree for your board
+   You can build :zephyr:code-sample:`hello_world` to see the "base" devicetree for your board
    without any additional changes from :ref:`overlay files <dt-input-files>`.
 
-For example, using the :ref:`qemu_cortex_m3` board to build :ref:`hello_world`:
+For example, using the :ref:`qemu_cortex_m3` board to build :zephyr:code-sample:`hello_world`:
 
 .. code-block:: sh
 
@@ -42,7 +42,7 @@ CMake prints the input and output file locations like this:
 
    -- Found BOARD.dts: .../zephyr/boards/arm/qemu_cortex_m3/qemu_cortex_m3.dts
    -- Generated zephyr.dts: .../zephyr/build/zephyr/zephyr.dts
-   -- Generated devicetree_generated.h: .../zephyr/build/zephyr/include/generated/devicetree_generated.h
+   -- Generated devicetree_generated.h: .../zephyr/build/zephyr/include/generated/zephyr/devicetree_generated.h
 
 The :file:`zephyr.dts` file is the final devicetree in DTS format.
 
@@ -149,7 +149,9 @@ that the node has ``status = "okay"``, like this:
 
 If you see the ``#error`` output, make sure to enable the node in your
 devicetree. In some situations your code will compile but it will fail to link
-with a message similar to::
+with a message similar to:
+
+.. code-block:: none
 
    ...undefined reference to `__device_dts_ord_N'
    collect2: error: ld returned 1 exit status
@@ -235,11 +237,10 @@ If you don't set :makevar:`DTC_OVERLAY_FILE`, the build system will follow
 these steps, looking for files in your application configuration directory to
 use as devicetree overlays:
 
-#. If the file :file:`boards/<BOARD>.overlay` exists, it will be used.
+#. If the file :file:`socs/<SOC>_<BOARD_QUALIFIERS>.overlay` exists, it will be used.
+#. If the file :file:`boards/<BOARD>.overlay` exists, it will be used in addition to the above.
 #. If the current board has :ref:`multiple revisions <porting_board_revisions>`
-   and :file:`boards/<BOARD>_<revision>.overlay` exists, it will be used.
-   This file will be used in addition to :file:`boards/<BOARD>.overlay`
-   if both exist.
+   and :file:`boards/<BOARD>_<revision>.overlay` exists, it will be used in addition to the above.
 #. If one or more files have been found in the previous steps, the build system
    stops looking and just uses those files.
 #. Otherwise, if :file:`<BOARD>.overlay` exists, it will be used, and the build
@@ -299,6 +300,7 @@ For example, if your BOARD.dts contains this node:
 These are equivalent ways to override the ``current-speed`` value in an
 overlay:
 
+.. Disable syntax highlighting as this construct does not seem supported by pygments
 .. code-block:: none
 
    /* Option 1 */
@@ -316,7 +318,7 @@ We'll use the ``&serial0`` style for the rest of these examples.
 You can add aliases to your devicetree using overlays: an alias is just a
 property of the ``/aliases`` node. For example:
 
-.. code-block:: none
+.. code-block:: devicetree
 
    / {
    	aliases {
@@ -326,7 +328,7 @@ property of the ``/aliases`` node. For example:
 
 Chosen nodes work the same way. For example:
 
-.. code-block:: none
+.. code-block:: devicetree
 
    / {
    	chosen {
@@ -337,7 +339,7 @@ Chosen nodes work the same way. For example:
 To delete a property (in addition to deleting properties in general, this is
 how to set a boolean property to false if it's true in BOARD.dts):
 
-.. code-block:: none
+.. code-block:: devicetree
 
    &serial0 {
    	/delete-property/ some-unwanted-property;
@@ -346,7 +348,7 @@ how to set a boolean property to false if it's true in BOARD.dts):
 You can add subnodes using overlays. For example, to configure a SPI or I2C
 child device on an existing bus node, do something like this:
 
-.. code-block:: none
+.. code-block:: devicetree
 
    /* SPI device example */
    &spi1 {
@@ -630,6 +632,6 @@ Applications that depend on board-specific devices
 
 One way to allow application code to run unmodified on multiple boards is by
 supporting a devicetree alias to specify the hardware specific portions, as is
-done in the :ref:`blinky-sample`. The application can then be configured in
+done in the :zephyr:code-sample:`blinky` sample. The application can then be configured in
 :ref:`BOARD.dts <devicetree-in-out-files>` files or via :ref:`devicetree
 overlays <use-dt-overlays>`.

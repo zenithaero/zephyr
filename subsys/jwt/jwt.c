@@ -15,7 +15,7 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/rsa.h>
 #include <mbedtls/sha256.h>
-#include <zephyr/random/rand32.h>
+#include <zephyr/random/random.h>
 #endif
 
 #ifdef CONFIG_JWT_SIGN_ECDSA
@@ -24,11 +24,11 @@
 #include <tinycrypt/ecc_dsa.h>
 #include <tinycrypt/constants.h>
 
-#include <zephyr/random/rand32.h>
+#include <zephyr/random/random.h>
 #endif
 
 /*
- * Base-64 encoding is typically done by lookup into a 64-byte static
+ * Base64URL encoding is typically done by lookup into a 64-byte static
  * array.  As an experiment, lets look at both code size and time for
  * one that does the character encoding computationally.  Like the
  * array version, this doesn't do bounds checking, and assumes the
@@ -255,11 +255,7 @@ static int setup_prng(void)
 
 	uint8_t entropy[TC_AES_KEY_SIZE + TC_AES_BLOCK_SIZE];
 
-	for (int i = 0; i < sizeof(entropy); i += sizeof(uint32_t)) {
-		uint32_t rv = sys_rand32_get();
-
-		memcpy(entropy + i, &rv, sizeof(uint32_t));
-	}
+	sys_rand_get(entropy, sizeof(entropy));
 
 	int res = tc_ctr_prng_init(&prng_state,
 				   (const uint8_t *) &entropy, sizeof(entropy),

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 NXP Semiconductor INC.
+ * Copyright 2021,2023 NXP Semiconductor INC.
  * All rights reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -124,13 +124,13 @@ static inline void i2s_purge_stream_buffers(struct stream *strm,
 
 	if (in_drop) {
 		while (k_msgq_get(&strm->in_queue, &buffer, K_NO_WAIT) == 0) {
-			k_mem_slab_free(mem_slab, &buffer);
+			k_mem_slab_free(mem_slab, buffer);
 		}
 	}
 
 	if (out_drop) {
 		while (k_msgq_get(&strm->out_queue, &buffer, K_NO_WAIT) == 0) {
-			k_mem_slab_free(mem_slab, &buffer);
+			k_mem_slab_free(mem_slab, buffer);
 		}
 	}
 }
@@ -151,8 +151,9 @@ static void i2s_tx_stream_disable(const struct device *dev, bool drop)
 	dma_stop(dev_dma, strm->dma_channel);
 
 	/* wait for TX FIFO to drain before disabling */
-	while ((dev_cfg->base->TCSR & I2S_TCSR_FWF_MASK) == 0)
+	while ((dev_cfg->base->TCSR & I2S_TCSR_FWF_MASK) == 0) {
 		;
+	}
 
 	/* Disable the channel FIFO */
 	dev_cfg->base->TCR3 &= ~I2S_TCR3_TCE_MASK;
@@ -196,8 +197,9 @@ static void i2s_rx_stream_disable(const struct device *dev,
 	SAI_RxEnable(dev_cfg->base, false);
 
 	/* wait for Receiver to disable */
-	while (dev_cfg->base->RCSR & I2S_RCSR_RE_MASK)
+	while (dev_cfg->base->RCSR & I2S_RCSR_RE_MASK) {
 		;
+	}
 	/* reset the FIFO pointer and clear error flags */
 	dev_cfg->base->RCSR |= (I2S_RCSR_FR_MASK | I2S_RCSR_SR_MASK);
 	dev_cfg->base->RCSR &= ~I2S_RCSR_SR_MASK;
@@ -277,7 +279,7 @@ static void i2s_dma_tx_callback(const struct device *dma_dev,
 	ret = k_msgq_get(&strm->out_queue, &buffer, K_NO_WAIT);
 	if (ret == 0) {
 		/* transmission complete. free the buffer */
-		k_mem_slab_free(strm->cfg.mem_slab, &buffer);
+		k_mem_slab_free(strm->cfg.mem_slab, buffer);
 		(strm->free_tx_dma_blocks)++;
 	} else {
 		LOG_ERR("no buf in out_queue for channel %u", channel);
@@ -577,11 +579,18 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 		SAI_GetDSPConfig(&config, kSAI_FrameSyncLenOneBitClk,
 				 word_size_bits, kSAI_Stereo,
 				 dev_cfg->tx_channel);
+		/* We need to set the data word count manually, since the HAL
+		 * function does not
+		 */
+		config.serialData.dataWordNum = num_words;
+		config.frameSync.frameSyncEarly = true;
+		config.bitClock.bclkPolarity = kSAI_SampleOnFallingEdge;
 		break;
 	case I2S_FMT_DATA_FORMAT_PCM_LONG:
 		SAI_GetTDMConfig(&config, kSAI_FrameSyncLenPerWordWidth,
 				 word_size_bits, num_words,
 				 dev_cfg->tx_channel);
+		config.bitClock.bclkPolarity = kSAI_SampleOnFallingEdge;
 		break;
 	default:
 		LOG_ERR("Unsupported I2S data format");
@@ -629,40 +638,52 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 	/* clock signal polarity */
 	switch (i2s_cfg->format & I2S_FMT_CLK_FORMAT_MASK) {
 	case I2S_FMT_CLK_NF_NB:
-		config.frameSync.frameSyncPolarity =
-			kSAI_PolarityActiveLow;
-		config.bitClock.bclkSrcSwap = false;
+		/* No action required, leave the configuration untouched */
 		break;
 
 	case I2S_FMT_CLK_NF_IB:
-		config.frameSync.frameSyncPolarity =
-			kSAI_PolarityActiveLow;
-		config.bitClock.bclkSrcSwap = true;
+		/* Swap bclk polarity */
+		config.bitClock.bclkPolarity =
+			(config.bitClock.bclkPolarity == kSAI_SampleOnFallingEdge) ?
+				kSAI_SampleOnRisingEdge :
+				kSAI_SampleOnFallingEdge;
 		break;
 
 	case I2S_FMT_CLK_IF_NB:
+		/* Swap frame sync polarity */
 		config.frameSync.frameSyncPolarity =
-			kSAI_PolarityActiveHigh;
-		config.bitClock.bclkSrcSwap = false;
+			(config.frameSync.frameSyncPolarity == kSAI_PolarityActiveHigh) ?
+				kSAI_PolarityActiveLow :
+				kSAI_PolarityActiveHigh;
 		break;
 
 	case I2S_FMT_CLK_IF_IB:
+		/* Swap frame sync and bclk polarity */
 		config.frameSync.frameSyncPolarity =
-			kSAI_PolarityActiveHigh;
-		config.bitClock.bclkSrcSwap = true;
+			(config.frameSync.frameSyncPolarity == kSAI_PolarityActiveHigh) ?
+				kSAI_PolarityActiveLow :
+				kSAI_PolarityActiveHigh;
+		config.bitClock.bclkPolarity =
+			(config.bitClock.bclkPolarity == kSAI_SampleOnFallingEdge) ?
+				kSAI_SampleOnRisingEdge :
+				kSAI_SampleOnFallingEdge;
 		break;
 	}
 
-	config.frameSync.frameSyncWidth = (uint8_t)word_size_bits;
+	/* PCM short format always requires that WS be one BCLK cycle */
+	if ((i2s_cfg->format & I2S_FMT_DATA_FORMAT_MASK) !=
+	    I2S_FMT_DATA_FORMAT_PCM_SHORT) {
+		config.frameSync.frameSyncWidth = (uint8_t)word_size_bits;
+	}
 
 	if (dir == I2S_DIR_TX) {
 		memcpy(&dev_data->tx.cfg, i2s_cfg, sizeof(struct i2s_config));
 		LOG_DBG("tx slab free_list = 0x%x",
 			(uint32_t)i2s_cfg->mem_slab->free_list);
 		LOG_DBG("tx slab num_blocks = %d",
-			(uint32_t)i2s_cfg->mem_slab->num_blocks);
+			(uint32_t)i2s_cfg->mem_slab->info.num_blocks);
 		LOG_DBG("tx slab block_size = %d",
-			(uint32_t)i2s_cfg->mem_slab->block_size);
+			(uint32_t)i2s_cfg->mem_slab->info.block_size);
 		LOG_DBG("tx slab buffer = 0x%x",
 			(uint32_t)i2s_cfg->mem_slab->buffer);
 
@@ -693,9 +714,9 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 		LOG_DBG("rx slab free_list = 0x%x",
 			(uint32_t)i2s_cfg->mem_slab->free_list);
 		LOG_DBG("rx slab num_blocks = %d",
-			(uint32_t)i2s_cfg->mem_slab->num_blocks);
+			(uint32_t)i2s_cfg->mem_slab->info.num_blocks);
 		LOG_DBG("rx slab block_size = %d",
-			(uint32_t)i2s_cfg->mem_slab->block_size);
+			(uint32_t)i2s_cfg->mem_slab->info.block_size);
 		LOG_DBG("rx slab buffer = 0x%x",
 			(uint32_t)i2s_cfg->mem_slab->buffer);
 
@@ -1129,13 +1150,13 @@ static void audio_clock_settings(const struct device *dev)
 	imxrt_audio_codec_pll_init(clock_name, dev_cfg->clk_src,
 				   dev_cfg->clk_pre_div, dev_cfg->clk_src_div);
 
-	#ifdef CONFIG_SOC_SERIES_IMX_RT11XX
+	#ifdef CONFIG_SOC_SERIES_IMXRT11XX
 		audioPllConfig.loopDivider = dev_cfg->pll_lp;
 		audioPllConfig.postDivider = dev_cfg->pll_pd;
 		audioPllConfig.numerator = dev_cfg->pll_num;
 		audioPllConfig.denominator = dev_cfg->pll_den;
 		audioPllConfig.ssEnable = false;
-	#elif defined CONFIG_SOC_SERIES_IMX_RT10XX
+	#elif defined CONFIG_SOC_SERIES_IMXRT10XX
 		audioPllConfig.src = dev_cfg->pll_src;
 		audioPllConfig.loopDivider = dev_cfg->pll_lp;
 		audioPllConfig.postDivider = dev_cfg->pll_pd;
@@ -1235,9 +1256,7 @@ static const struct i2s_driver_api i2s_mcux_driver_api = {
 									\
 	static const struct i2s_mcux_config i2s_##i2s_id##_config = {	\
 		.base = (I2S_Type *)DT_INST_REG_ADDR(i2s_id),		\
-		.clk_src =						\
-			DT_CLOCKS_CELL_BY_IDX(DT_DRV_INST(i2s_id),	\
-				0, bits),				\
+		.clk_src = DT_INST_PROP(i2s_id, clock_mux),		\
 		.clk_pre_div = DT_INST_PROP(i2s_id, pre_div),		\
 		.clk_src_div = DT_INST_PROP(i2s_id, podf),		\
 		.pll_src =						\
@@ -1286,7 +1305,7 @@ static const struct i2s_driver_api i2s_mcux_driver_api = {
 				CONFIG_I2S_EDMA_BURST_SIZE,		\
 			  .dma_callback = i2s_dma_tx_callback,		\
 			  .complete_callback_en = 1,			\
-			  .error_callback_en = 1,			\
+			  .error_callback_dis = 1,			\
 			  .block_count = 1,				\
 			  .head_block =					\
 				&i2s_##i2s_id##_data.tx.dma_block,	\
@@ -1306,7 +1325,7 @@ static const struct i2s_driver_api i2s_mcux_driver_api = {
 				CONFIG_I2S_EDMA_BURST_SIZE,		\
 			  .dma_callback = i2s_dma_rx_callback,		\
 			  .complete_callback_en = 1,			\
-			  .error_callback_en = 1,			\
+			  .error_callback_dis = 1,			\
 			  .block_count = 1,				\
 			  .head_block =					\
 				&i2s_##i2s_id##_data.rx.dma_block,	\

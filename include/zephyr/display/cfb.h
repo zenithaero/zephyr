@@ -21,16 +21,9 @@ extern "C" {
 #endif
 
 /**
- * @brief Display Drivers
- * @addtogroup display_interfaces Display Drivers
- * @{
- * @}
- */
-
-/**
  * @brief Public Monochrome Character Framebuffer API
  * @defgroup monochrome_character_framebuffer Monochrome Character Framebuffer
- * @ingroup display_interfaces
+ * @ingroup utilities
  * @{
  */
 
@@ -247,6 +240,13 @@ int cfb_get_numof_fonts(const struct device *dev);
  * @return 0 on success, negative value otherwise
  */
 int cfb_framebuffer_init(const struct device *dev);
+
+/**
+ * @brief Deinitialize Character Framebuffer.
+ *
+ * @param dev Pointer to device structure for driver instance
+ */
+void cfb_framebuffer_deinit(const struct device *dev);
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,8 @@
-.. _ams_iaqcore:
+.. zephyr:code-sample:: ams_iaqcore
+   :name: ams iAQcore indoor air quality sensor
+   :relevant-api: sensor_interface
 
-ams iAQcore Indoor air quality sensor
-#####################################
+   Get CO2 equivalent and VOC data from an ams iAQcore sensor.
 
 Overview
 ********
@@ -14,7 +15,7 @@ Building and Running
 ********************
 
 This sample application uses the sensor connected to the i2c stated in the
-iaq_core.overlay file.
+app.overlay file.
 Flash the binary to a board of choice with a sensor connected.
 This sample can run on every board with i2c.
 For example build for a nucleo_f446re board:

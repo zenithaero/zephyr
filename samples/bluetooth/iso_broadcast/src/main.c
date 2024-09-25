@@ -19,6 +19,8 @@ NET_BUF_POOL_FIXED_DEFINE(bis_tx_pool, BIS_ISO_CHAN_COUNT,
 
 static K_SEM_DEFINE(sem_big_cmplt, 0, BIS_ISO_CHAN_COUNT);
 static K_SEM_DEFINE(sem_big_term, 0, BIS_ISO_CHAN_COUNT);
+static K_SEM_DEFINE(sem_iso_data, CONFIG_BT_ISO_TX_BUF_COUNT,
+				   CONFIG_BT_ISO_TX_BUF_COUNT);
 
 #define INITIAL_TIMEOUT_COUNTER (BIG_TERMINATE_TIMEOUT_US / BIG_SDU_INTERVAL_US)
 
@@ -40,9 +42,15 @@ static void iso_disconnected(struct bt_iso_chan *chan, uint8_t reason)
 	k_sem_give(&sem_big_term);
 }
 
+static void iso_sent(struct bt_iso_chan *chan)
+{
+	k_sem_give(&sem_iso_data);
+}
+
 static struct bt_iso_chan_ops iso_ops = {
 	.connected	= iso_connected,
 	.disconnected	= iso_disconnected,
+	.sent           = iso_sent,
 };
 
 static struct bt_iso_chan_io_qos iso_tx_qos = {
@@ -74,6 +82,10 @@ static struct bt_iso_big_create_param big_create_param = {
 	.framing = 0, /* 0 - unframed, 1 - framed */
 };
 
+static const struct bt_data ad[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
 int main(void)
 {
 	uint32_t timeout_counter = INITIAL_TIMEOUT_COUNTER;
@@ -93,10 +105,17 @@ int main(void)
 		return 0;
 	}
 
-	/* Create a non-connectable non-scannable advertising set */
-	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_NCONN_NAME, NULL, &adv);
+	/* Create a non-connectable advertising set */
+	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_NCONN, NULL, &adv);
 	if (err) {
 		printk("Failed to create advertising set (err %d)\n", err);
+		return 0;
+	}
+
+	/* Set advertising data to have complete local name set */
+	err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), NULL, 0);
+	if (err) {
+		printk("Failed to set advertising data (err %d)\n", err);
 		return 0;
 	}
 
@@ -140,12 +159,9 @@ int main(void)
 	}
 
 	while (true) {
-		int ret;
-
-		k_sleep(K_USEC(big_create_param.interval));
-
 		for (uint8_t chan = 0U; chan < BIS_ISO_CHAN_COUNT; chan++) {
 			struct net_buf *buf;
+			int ret;
 
 			buf = net_buf_alloc(&bis_tx_pool,
 					    K_MSEC(BUF_ALLOC_TIMEOUT));
@@ -154,11 +170,19 @@ int main(void)
 				       " %u\n", chan);
 				return 0;
 			}
+
+			ret = k_sem_take(&sem_iso_data,
+					 K_MSEC(BUF_ALLOC_TIMEOUT));
+			if (ret) {
+				printk("k_sem_take for ISO data sent failed\n");
+				net_buf_unref(buf);
+				return 0;
+			}
+
 			net_buf_reserve(buf, BT_ISO_CHAN_SEND_RESERVE);
 			sys_put_le32(iso_send_count, iso_data);
 			net_buf_add_mem(buf, iso_data, sizeof(iso_data));
-			ret = bt_iso_chan_send(&bis_iso_chan[chan], buf,
-					       seq_num, BT_ISO_TIMESTAMP_NONE);
+			ret = bt_iso_chan_send(&bis_iso_chan[chan], buf, seq_num);
 			if (ret < 0) {
 				printk("Unable to broadcast data on channel %u"
 				       " : %d", chan, ret);

@@ -3,7 +3,7 @@
 
 source ${ZEPHYR_BASE}/tests/bsim/sh_common.source
 
-EXECUTE_TIMEOUT=300
+EXECUTE_TIMEOUT=800
 
 function Skip(){
   for i in "${SKIP[@]}" ; do
@@ -26,20 +26,30 @@ function RunTest(){
   s_id=$1
   shift 1
 
-  testids=()
-  for testid in $@ ; do
-    if [ "$testid" == "--" ]; then
+  declare -A testids
+  testid=""
+  testid_in_order=()
+
+  for arg in $@ ; do
+    if [ "$arg" == "--" ]; then
       shift 1
       break
     fi
 
-    testids+=( $testid )
+    if [[ "$arg" == "-"* ]]; then
+        testids["${testid}"]+="$arg "
+    else
+        testid=$arg
+        testid_in_order+=($testid)
+        testids["${testid}"]=""
+    fi
+
     shift 1
   done
 
   test_options=$@
 
-  for testid in ${testids[@]} ; do
+  for testid in ${testid_in_order[@]}; do
     if Skip $testid; then
       echo "Skipping $testid (device #$idx)"
       let idx=idx+1
@@ -50,15 +60,15 @@ function RunTest(){
     conf=${conf:-prj_conf}
 
     if [ ${overlay} ]; then
-        exe_name=./bs_${BOARD}_tests_bsim_bluetooth_mesh_${conf}_${overlay}
+        exe_name=./bs_${BOARD_TS}_tests_bsim_bluetooth_mesh_${conf}_${overlay}
     else
-        exe_name=./bs_${BOARD}_tests_bsim_bluetooth_mesh_${conf}
+        exe_name=./bs_${BOARD_TS}_tests_bsim_bluetooth_mesh_${conf}
     fi
 
     Execute \
       ${exe_name} \
       -v=${verbosity_level} -s=$s_id -d=$idx -sync_preboot -RealEncryption=1 \
-      -testid=$testid ${test_options}
+      -testid=$testid ${testids["${testid}"]} ${test_options}
     let idx=idx+1
   done
 
@@ -69,4 +79,29 @@ function RunTest(){
   Execute ./bs_2G4_phy_v1 -v=${verbosity_level} -s=$s_id -D=$count -argschannel -at=35
 
   wait_for_background_jobs
+}
+
+function RunTestFlash(){
+  s_id=$1
+  ext_arg="${s_id} "
+  idx=0
+  shift 1
+
+  for arg in $@ ; do
+    if [ "$arg" == "--" ]; then
+      ext_arg+=$@
+      break
+    fi
+
+    ext_arg+="$arg "
+
+    if [[ "$arg" != "-"* ]]; then
+      ext_arg+="-flash=../results/${s_id}/${s_id}_${idx}.bin "
+      let idx=idx+1
+    fi
+
+    shift 1
+  done
+
+  RunTest ${ext_arg}
 }

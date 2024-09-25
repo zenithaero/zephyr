@@ -140,6 +140,7 @@ depends on" relation:
 - a node directly depends on any nodes its properties refer to by phandle
 - a node directly depends on its ``interrupt-parent`` if it has an
   ``interrupts`` property
+- a parent node inherits all dependencies from its child nodes
 
 A *dependency ordering* of a devicetree is a list of its nodes, where each node
 ``n`` appears earlier in the list than any nodes that depend on ``n``. A node's
@@ -358,7 +359,6 @@ system-wide settings. The :c:func:`DT_CHOSEN()` macro can be used to get a node
 identifier for a chosen node.
 
 .. doxygengroup:: devicetree-generic-chosen
-   :project: Zephyr
 
 Zephyr-specific chosen nodes
 ****************************
@@ -382,11 +382,11 @@ device.
      - Purpose
    * - zephyr,bt-c2h-uart
      - Selects the UART used for host communication in the
-       :ref:`bluetooth-hci-uart-sample`
+       :zephyr:code-sample:`bluetooth_hci_uart`
    * - zephyr,bt-mon-uart
      - Sets UART device used for the Bluetooth monitor logging
-   * - zephyr,bt-uart
-     - Sets UART device used by Bluetooth
+   * - zephyr,bt-hci
+     - Selects the HCI device used by the Bluetooth host stack
    * - zephyr,canbus
      - Sets the default CAN controller
    * - zephyr,ccm
@@ -423,6 +423,9 @@ device.
        interprocess-communication (IPC)
    * - zephyr,itcm
      - Instruction Tightly Coupled Memory node on some Arm SoCs
+   * - zephyr,log-uart
+     - Sets the UART device(s) used by the logging subsystem's UART backend.
+       If defined, the UART log backend would output to the devices listed in this node.
    * - zephyr,ocm
      - On-chip memory node on Xilinx Zynq-7000 and ZynqMP SoCs
    * - zephyr,osdp-uart
@@ -450,3 +453,6 @@ device.
    * - zephyr,usb-device
      - USB device node. If defined and has a ``vbus-gpios`` property, these
        will be used by the USB subsystem to enable/disable VBUS
+   * - zephyr,led-strip
+     - A LED-strip node which is used to determine the timings of the
+       WS2812 GPIO driver

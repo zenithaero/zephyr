@@ -32,7 +32,7 @@ Most ``<zephyr/storage/flash_map.h>`` API functions require a :c:struct:`flash_a
 characterizing the flash area they will be working on. There are two possible
 methods to obtain such a pointer:
 
- * obtain it using `flash_area_open`;
+ * obtain it using :c:func:`flash_area_open`;
 
  * defining a :c:struct:`flash_area` type object, which requires providing
    a valid :c:struct:`device` object pointer with offset and size of the area
@@ -72,13 +72,13 @@ documentation`_ for more details.
 The ``storage_partition`` node is defined for use by a file system or other
 nonvolatile storage API.
 
-.. _MCUboot documentation: https://mcuboot.com/
+.. _MCUboot documentation: https://docs.mcuboot.com
 
 Numeric flash area ID is obtained by passing DTS node label to
 :c:macro:`FIXED_PARTITION_ID()`; for example to obtain ID number
-for ``slot0_partition``, user would invoke ``FIXED_PARITION_ID(slot0_partition)``.
+for ``slot0_partition``, user would invoke ``FIXED_PARTITION_ID(slot0_partition)``.
 
-All :c:macro:`FIXED_PARTITION_` macros take DTS node labels as partition
+All :code:`FIXED_PARTITION_*` macros take DTS node labels as partition
 identifiers.
 
 Users do not have to obtain a :c:struct:`flash_area` object pointer
@@ -96,7 +96,7 @@ using :c:func:`flash_area_open` and DTS node label:
 .. code-block:: c
 
    const struct flash_area *my_area;
-   int err = flash_area_open(FIXED_PARITION_ID(slot0_partition), &my_area);
+   int err = flash_area_open(FIXED_PARTITION_ID(slot0_partition), &my_area);
 
    if (err != 0) {
    	handle_the_error(err);

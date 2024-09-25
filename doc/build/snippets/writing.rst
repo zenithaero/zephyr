@@ -58,7 +58,7 @@ The build system looks for snippets in these places:
 
 #. In directories configured by the :makevar:`SNIPPET_ROOT` CMake variable.
    This always includes the zephyr repository (so
-   :zephyr_file:`zephyr/snippets` is always a source of snippets) and the
+   :zephyr_file:`snippets/` is always a source of snippets) and the
    application source directory (so :file:`<app>/snippets` is also).
 
    Additional directories can be added manually at CMake time.
@@ -155,6 +155,20 @@ This :file:`snippet.yml` adds :file:`foo.conf` to the build:
 
 The path to :file:`foo.conf` is relative to the directory containing
 :file:`snippet.yml`.
+
+``DTS_EXTRA_CPPFLAGS``
+**********************
+
+This :file:`snippet.yml` adds ``DTS_EXTRA_CPPFLAGS`` CMake Cache variables
+to the build:
+
+.. code-block:: yaml
+
+   name: foo
+   append:
+     DTS_EXTRA_CPPFLAGS: -DMY_DTS_CONFIGURE
+
+Adding these flags enables control over the content of a devicetree file.
 
 Board-specific settings
 ***********************

@@ -12,13 +12,15 @@ message(STATUS "Zephyr base: ${ZEPHYR_BASE}")
 #-------------------------------------------------------------------------------
 # Options
 
-set(SPHINXOPTS "-j auto" CACHE STRING "Default Sphinx Options")
+set(SPHINXOPTS "-j auto -W --keep-going -T" CACHE STRING "Default Sphinx Options")
+set(SPHINXOPTS_EXTRA "" CACHE STRING "Extra Sphinx Options (added to defaults)")
 set(LATEXMKOPTS "-halt-on-error -no-shell-escape" CACHE STRING "Default latexmk options")
 set(DT_TURBO_MODE OFF CACHE BOOL "Enable DT turbo mode")
 set(DOC_TAG "development" CACHE STRING "Documentation tag")
 set(DTS_ROOTS "${ZEPHYR_BASE}" CACHE STRING "DT bindings root folders")
 
 separate_arguments(SPHINXOPTS)
+separate_arguments(SPHINXOPTS_EXTRA)
 separate_arguments(LATEXMKOPTS)
 
 #-------------------------------------------------------------------------------
@@ -30,6 +32,7 @@ find_program(SPHINXBUILD sphinx-build)
 if(NOT SPHINXBUILD)
   message(FATAL_ERROR "The 'sphinx-build' command was not found")
 endif()
+find_program(SPHINXAUTOBUILD sphinx-autobuild)
 
 find_package(LATEX COMPONENTS PDFLATEX)
 find_program(LATEXMK latexmk)
@@ -43,7 +46,18 @@ endif()
 set(SPHINX_ENV
   DOXYGEN_EXECUTABLE=${DOXYGEN_EXECUTABLE}
   DOT_EXECUTABLE=${DOXYGEN_DOT_EXECUTABLE}
+  DOCS_HTML_DIR=${CMAKE_CURRENT_BINARY_DIR}/html
 )
+
+if(DEFINED ENV{ZEPHYR_DOXYGEN_OVERLAY})
+  if(EXISTS $ENV{ZEPHYR_DOXYGEN_OVERLAY})
+    set(INCLUDE_CUSTOM_FILE "@INCLUDE = $ENV{ZEPHYR_DOXYGEN_OVERLAY}")
+  else()
+    message(FATAL_ERROR "Zephyr Doxygen overlay $ENV{ZEPHYR_DOXYGEN_OVERLAY} does not exist!")
+  endif()
+else()
+  set(INCLUDE_CUSTOM_FILE "")
+endif()
 
 set(DOCS_CFG_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(DOCS_DOCTREE_DIR ${CMAKE_CURRENT_BINARY_DIR}/doctrees)
@@ -145,6 +159,7 @@ add_doc_target(
     -w ${DOCS_BUILD_DIR}/html.log
     -t ${DOC_TAG}
     ${SPHINXOPTS}
+    ${SPHINXOPTS_EXTRA}
     ${DOCS_SRC_DIR}
     ${DOCS_HTML_DIR}
   USES_TERMINAL
@@ -160,6 +175,35 @@ set_target_properties(
 add_dependencies(html devicetree)
 
 #-------------------------------------------------------------------------------
+# html-live
+
+add_doc_target(
+  html-live
+  COMMAND ${CMAKE_COMMAND} -E env ${SPHINX_ENV}
+  ${SPHINXAUTOBUILD}
+    --watch ${DOCS_CFG_DIR}
+    --ignore ${DOCS_BUILD_DIR}
+    -b html
+    -c ${DOCS_CFG_DIR}
+    -d ${DOCS_DOCTREE_DIR}
+    -w ${DOCS_BUILD_DIR}/html.log
+    -t ${DOC_TAG}
+    ${SPHINXOPTS}
+    ${SPHINXOPTS_EXTRA}
+    ${DOCS_SRC_DIR}
+    ${DOCS_HTML_DIR}
+  USES_TERMINAL
+  COMMENT "Running Sphinx HTML autobuild..."
+)
+
+set_target_properties(
+  html-live html-live-nodeps
+  PROPERTIES
+    ADDITIONAL_CLEAN_FILES "${DOCS_SRC_DIR};${DOCS_HTML_DIR};${DOCS_DOCTREE_DIR}"
+)
+
+add_dependencies(html-live devicetree)
+#-------------------------------------------------------------------------------
 # pdf
 
 add_doc_target(
@@ -171,8 +215,9 @@ add_doc_target(
     -d ${DOCS_DOCTREE_DIR}
     -w ${DOCS_BUILD_DIR}/latex.log
     -t ${DOC_TAG}
-    -t svgconvert
+    -t convertimages
     ${SPHINXOPTS}
+    ${SPHINXOPTS_EXTRA}
     ${DOCS_SRC_DIR}
     ${DOCS_LATEX_DIR}
   USES_TERMINAL
@@ -223,6 +268,7 @@ add_doc_target(
     -w ${DOCS_BUILD_DIR}/linkcheck.log
     -t ${DOC_TAG}
     ${SPHINXOPTS}
+    ${SPHINXOPTS_EXTRA}
     ${DOCS_SRC_DIR}
     ${DOCS_LINKCHECK_DIR}
   USES_TERMINAL

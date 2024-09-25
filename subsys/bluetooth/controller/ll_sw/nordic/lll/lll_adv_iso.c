@@ -9,6 +9,7 @@
 
 #include <soc.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/util.h>
 
 #include "hal/cpu.h"
 #include "hal/ccm.h"
@@ -188,6 +189,8 @@ static int prepare_cb_common(struct lll_prepare_param *p)
 	struct ull_hdr *ull;
 	uint32_t remainder;
 	uint32_t start_us;
+	uint8_t pkt_flags;
+	uint32_t ret;
 	uint8_t phy;
 
 	DEBUG_RADIO_START_A(1);
@@ -291,7 +294,7 @@ static int prepare_cb_common(struct lll_prepare_param *p)
 
 	if (!link) {
 		pdu = radio_pkt_empty_get();
-		pdu->ll_id = PDU_BIS_LLID_START_CONTINUE;
+		pdu->ll_id = lll->framing ? PDU_BIS_LLID_FRAMED : PDU_BIS_LLID_START_CONTINUE;
 		pdu->len = 0U;
 	} else {
 		pdu = (void *)tx->pdu;
@@ -339,36 +342,39 @@ static int prepare_cb_common(struct lll_prepare_param *p)
 			lll->cssn++;
 		}
 
-		lll->ctrl_chan_use = data_chan_use;
 		pdu->cstf = 1U;
 	} else {
 		pdu->cstf = 0U;
 	}
 	pdu->cssn = lll->cssn;
 
-	/* Encryption */
-	if (pdu->len && lll->enc) {
-		uint8_t pkt_flags;
-
+	/* Radio packet configuration */
+	pkt_flags = RADIO_PKT_CONF_FLAGS(RADIO_PKT_CONF_PDU_TYPE_BIS, phy,
+					 RADIO_PKT_CONF_CTE_DISABLED);
+	if (IS_ENABLED(CONFIG_BT_CTLR_BROADCAST_ISO_ENC) &&
+	    pdu->len && lll->enc) {
+		/* Encryption */
 		lll->ccm_tx.counter = payload_count;
 
 		(void)memcpy(lll->ccm_tx.iv, lll->giv, 4U);
 		mem_xor_32(lll->ccm_tx.iv, lll->ccm_tx.iv, access_addr);
 
-		pkt_flags = RADIO_PKT_CONF_FLAGS(RADIO_PKT_CONF_PDU_TYPE_BIS,
-						 phy,
-						 RADIO_PKT_CONF_CTE_DISABLED);
 		radio_pkt_configure(RADIO_PKT_CONF_LENGTH_8BIT,
 				    (lll->max_pdu + PDU_MIC_SIZE), pkt_flags);
-		radio_pkt_tx_set(radio_ccm_tx_pkt_set(&lll->ccm_tx, pdu));
-	} else {
-		uint8_t pkt_flags;
 
-		pkt_flags = RADIO_PKT_CONF_FLAGS(RADIO_PKT_CONF_PDU_TYPE_BIS,
-						 phy,
-						 RADIO_PKT_CONF_CTE_DISABLED);
-		radio_pkt_configure(RADIO_PKT_CONF_LENGTH_8BIT, lll->max_pdu,
-				    pkt_flags);
+		radio_pkt_tx_set(radio_ccm_iso_tx_pkt_set(&lll->ccm_tx,
+						RADIO_PKT_CONF_PDU_TYPE_BIS,
+						pdu));
+	} else {
+		if (lll->enc) {
+			radio_pkt_configure(RADIO_PKT_CONF_LENGTH_8BIT,
+					    (lll->max_pdu + PDU_MIC_SIZE),
+					    pkt_flags);
+		} else {
+			radio_pkt_configure(RADIO_PKT_CONF_LENGTH_8BIT,
+					    lll->max_pdu, pkt_flags);
+		}
+
 		radio_pkt_tx_set(pdu);
 	}
 
@@ -402,7 +408,7 @@ static int prepare_cb_common(struct lll_prepare_param *p)
 	remainder = p->remainder;
 	start_us = radio_tmr_start(1U, ticks_at_start, remainder);
 
-	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR)) {
+	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR) || IS_ENABLED(HAL_RADIO_GPIO_HAVE_PA_PIN)) {
 		/* setup capture of PDU end timestamp */
 		radio_tmr_end_capture();
 	}
@@ -411,29 +417,31 @@ static int prepare_cb_common(struct lll_prepare_param *p)
 	radio_gpio_pa_setup();
 
 	radio_gpio_pa_lna_enable(start_us +
-				 radio_tx_ready_delay_get(phy, PHY_FLAGS_S8) -
+				 radio_tx_ready_delay_get(lll->phy,
+							  lll->phy_flags) -
 				 HAL_RADIO_GPIO_PA_OFFSET);
 #else /* !HAL_RADIO_GPIO_HAVE_PA_PIN */
 	ARG_UNUSED(start_us);
 #endif /* !HAL_RADIO_GPIO_HAVE_PA_PIN */
 
-	if (0) {
 #if defined(CONFIG_BT_CTLR_XTAL_ADVANCED) && \
 	(EVENT_OVERHEAD_PREEMPT_US <= EVENT_OVERHEAD_PREEMPT_MIN_US)
+	uint32_t overhead;
+
+	overhead = lll_preempt_calc(ull, (TICKER_ID_ADV_ISO_BASE + lll->handle), ticks_at_event);
 	/* check if preempt to start has changed */
-	} else if (lll_preempt_calc(ull, (TICKER_ID_ADV_ISO_BASE + lll->handle),
-				    ticks_at_event)) {
+	if (overhead) {
+		LL_ASSERT_OVERHEAD(overhead);
+
 		radio_isr_set(lll_isr_abort, lll);
 		radio_disable();
 
 		return -ECANCELED;
-#endif /* CONFIG_BT_CTLR_XTAL_ADVANCED */
-	} else {
-		uint32_t ret;
-
-		ret = lll_prepare_done(lll);
-		LL_ASSERT(!ret);
 	}
+#endif /* CONFIG_BT_CTLR_XTAL_ADVANCED */
+
+	ret = lll_prepare_done(lll);
+	LL_ASSERT(!ret);
 
 	/* Calculate ahead the next subevent channel index */
 	next_chan_calc(lll, event_counter, data_chan_id);
@@ -456,13 +464,17 @@ static void isr_tx_common(void *param,
 			  radio_isr_cb_t isr_done)
 {
 	struct pdu_bis *pdu = NULL;
+	uint8_t data_chan_use = 0;
 	struct lll_adv_iso *lll;
 	uint8_t access_addr[4];
 	uint64_t payload_count;
 	uint16_t data_chan_id;
-	uint8_t data_chan_use;
 	uint8_t crc_init[3];
 	uint8_t bis;
+
+#if defined(HAL_RADIO_GPIO_HAVE_PA_PIN)
+	uint16_t pa_iss_us = 0U;
+#endif /* HAL_RADIO_GPIO_HAVE_PA_PIN */
 
 	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR)) {
 		lll_prof_latency_capture();
@@ -521,7 +533,6 @@ static void isr_tx_common(void *param,
 		/* control subevent to use bis = 0 and se_n = 1 */
 		bis = 0U;
 		payload_count = lll->payload_count - lll->bn;
-		data_chan_use = lll->ctrl_chan_use;
 
 	} else if (((lll->chm_req - lll->chm_ack) & CHM_STATE_MASK) ==
 		   CHM_STATE_SEND) {
@@ -545,7 +556,6 @@ static void isr_tx_common(void *param,
 		/* control subevent to use bis = 0 and se_n = 1 */
 		bis = 0U;
 		payload_count = lll->payload_count - lll->bn;
-		data_chan_use = lll->ctrl_chan_use;
 
 	} else {
 		struct lll_adv_iso_stream *stream;
@@ -645,13 +655,14 @@ static void isr_tx_common(void *param,
 		}
 		if (!link || (tx->payload_count != payload_count)) {
 			pdu = radio_pkt_empty_get();
-			pdu->ll_id = PDU_BIS_LLID_START_CONTINUE;
+			pdu->ll_id = lll->framing ? PDU_BIS_LLID_FRAMED :
+						    PDU_BIS_LLID_START_CONTINUE;
 			pdu->len = 0U;
 		} else {
 			pdu = (void *)tx->pdu;
 		}
 		pdu->cssn = lll->cssn;
-		pdu->cstf = 0U;
+		pdu->cstf = (lll->term_req || !!(lll->chm_req - lll->chm_ack));
 
 #else /* TEST_WITH_DUMMY_PDU */
 		pdu = radio_pkt_scratch_get();
@@ -680,16 +691,30 @@ static void isr_tx_common(void *param,
 	}
 	pdu->rfu = 0U;
 
+	if (!bis) {
+		const uint16_t event_counter = payload_count / lll->bn;
+
+		/* Calculate the radio channel to use for ISO event */
+		data_chan_use = lll_chan_iso_event(event_counter, data_chan_id,
+						   lll->data_chan_map,
+						   lll->data_chan_count,
+						   &lll->data_chan_prn_s,
+						   &lll->data_chan_remap_idx);
+	}
+
 	lll_chan_set(data_chan_use);
 
 	/* Encryption */
-	if (pdu->len && lll->enc) {
+	if (IS_ENABLED(CONFIG_BT_CTLR_BROADCAST_ISO_ENC) &&
+	    pdu->len && lll->enc) {
 		lll->ccm_tx.counter = payload_count;
 
 		(void)memcpy(lll->ccm_tx.iv, lll->giv, 4U);
 		mem_xor_32(lll->ccm_tx.iv, lll->ccm_tx.iv, access_addr);
 
-		radio_pkt_tx_set(radio_ccm_tx_pkt_set(&lll->ccm_tx, pdu));
+		radio_pkt_tx_set(radio_ccm_iso_tx_pkt_set(&lll->ccm_tx,
+						RADIO_PKT_CONF_PDU_TYPE_BIS,
+						pdu));
 	} else {
 		radio_pkt_tx_set(pdu);
 	}
@@ -711,7 +736,7 @@ static void isr_tx_common(void *param,
 					    pkt_flags);
 		}
 
-		radio_switch_complete_and_disable();
+		radio_switch_complete_and_b2b_tx_disable();
 
 		radio_isr_set(isr_done_term, lll);
 	} else {
@@ -727,19 +752,47 @@ static void isr_tx_common(void *param,
 						 lll->phy, lll->phy_flags);
 
 		radio_isr_set(isr_tx, lll);
+
+#if defined(HAL_RADIO_GPIO_HAVE_PA_PIN)
+		/* local variable used later to store iss_us next subevent PA
+		 * setup.
+		 */
+		pa_iss_us = iss_us;
+#endif /* HAL_RADIO_GPIO_HAVE_PA_PIN */
 	}
 
-	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR)) {
-		/* setup capture of PDU end timestamp */
-		radio_tmr_end_capture();
-	}
-
-	/* assert if radio packet ptr is not set and radio started rx */
+	/* assert if radio packet ptr is not set and radio started tx */
 	LL_ASSERT(!radio_is_ready());
 
 	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR)) {
 		lll_prof_cputime_capture();
 	}
+
+	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR) || IS_ENABLED(HAL_RADIO_GPIO_HAVE_PA_PIN)) {
+		/* setup capture of PDU end timestamp */
+		radio_tmr_end_capture();
+	}
+
+#if defined(HAL_RADIO_GPIO_HAVE_PA_PIN)
+	if (IS_ENABLED(CONFIG_BT_CTLR_PROFILE_ISR)) {
+		/* PA/LNA enable is overwriting packet end used in ISR
+		 * profiling, hence back it up for later use.
+		 */
+		lll_prof_radio_end_backup();
+	}
+
+	radio_gpio_pa_setup();
+	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() +
+				 lll->pa_iss_us -
+				 (EVENT_CLOCK_JITTER_US << 1U) -
+				 radio_tx_chain_delay_get(lll->phy,
+							  lll->phy_flags) -
+				 HAL_RADIO_GPIO_PA_OFFSET);
+
+	/* Remember to use it for the next subevent PA setup */
+	lll->pa_iss_us = pa_iss_us;
+
+#endif /* HAL_RADIO_GPIO_HAVE_PA_PIN */
 
 	/* Calculate ahead the next subevent channel index */
 	const uint16_t event_counter = (lll->payload_count / lll->bn) - 1U;
@@ -822,7 +875,7 @@ static void isr_done_term(void *param)
 			sync_lll = adv_lll->sync;
 			if (sync_lll->iso_chm_done_req ==
 			    sync_lll->iso_chm_done_ack) {
-				struct node_rx_hdr *rx;
+				struct node_rx_pdu *rx;
 
 				/* Request ULL to update the channel map in the
 				 * BIGInfo struct present in the current PDU of
@@ -838,10 +891,10 @@ static void isr_done_term(void *param)
 				rx = ull_pdu_rx_alloc();
 				LL_ASSERT(rx);
 
-				rx->type = NODE_RX_TYPE_BIG_CHM_COMPLETE;
+				rx->hdr.type = NODE_RX_TYPE_BIG_CHM_COMPLETE;
 				rx->rx_ftr.param = lll;
 
-				ull_rx_put_sched(rx->link, rx);
+				ull_rx_put_sched(rx->hdr.link, rx);
 			}
 
 			/* Use new channel map */

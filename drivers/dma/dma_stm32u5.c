@@ -24,13 +24,13 @@ LOG_MODULE_REGISTER(dma_stm32, CONFIG_DMA_LOG_LEVEL);
 
 #define DT_DRV_COMPAT st_stm32u5_dma
 
-static const uint32_t table_m_size[] = {
+static const uint32_t table_src_size[] = {
 	LL_DMA_SRC_DATAWIDTH_BYTE,
 	LL_DMA_SRC_DATAWIDTH_HALFWORD,
 	LL_DMA_SRC_DATAWIDTH_WORD,
 };
 
-static const uint32_t table_p_size[] = {
+static const uint32_t table_dst_size[] = {
 	LL_DMA_DEST_DATAWIDTH_BYTE,
 	LL_DMA_DEST_DATAWIDTH_HALFWORD,
 	LL_DMA_DEST_DATAWIDTH_WORD,
@@ -98,6 +98,24 @@ void dma_stm32_clear_tc(DMA_TypeDef *DMAx, uint32_t id)
 	LL_DMA_ClearFlag_TC(DMAx, dma_stm32_id_to_stream(id));
 }
 
+/* data transfer error */
+static inline bool dma_stm32_is_dte_active(DMA_TypeDef *dma, uint32_t id)
+{
+	return LL_DMA_IsActiveFlag_DTE(dma, dma_stm32_id_to_stream(id));
+}
+
+/* link transfer error */
+static inline bool dma_stm32_is_ule_active(DMA_TypeDef *dma, uint32_t id)
+{
+	return LL_DMA_IsActiveFlag_ULE(dma, dma_stm32_id_to_stream(id));
+}
+
+/* user setting error */
+static inline bool dma_stm32_is_use_active(DMA_TypeDef *dma, uint32_t id)
+{
+	return LL_DMA_IsActiveFlag_USE(dma, dma_stm32_id_to_stream(id));
+}
+
 /* transfer error either a data or user or link error */
 bool dma_stm32_is_te_active(DMA_TypeDef *DMAx, uint32_t id)
 {
@@ -127,10 +145,13 @@ void dma_stm32_clear_ht(DMA_TypeDef *DMAx, uint32_t id)
 
 void stm32_dma_dump_stream_irq(DMA_TypeDef *dma, uint32_t id)
 {
-	LOG_INF("tc: %d, ht: %d, te: %d",
+	LOG_INF("tc: %d, ht: %d, dte: %d, ule: %d, use: %d",
 		dma_stm32_is_tc_active(dma, id),
 		dma_stm32_is_ht_active(dma, id),
-		dma_stm32_is_te_active(dma, id));
+		dma_stm32_is_dte_active(dma, id),
+		dma_stm32_is_ule_active(dma, id),
+		dma_stm32_is_use_active(dma, id)
+	);
 }
 
 /* Check if nsecure masked interrupt is active on channel */
@@ -243,7 +264,6 @@ static void dma_stm32_irq_handler(const struct device *dev, uint32_t id)
 		return;
 	}
 	callback_arg = id + STM32_DMA_STREAM_OFFSET;
-	stream->busy = false;
 
 	/* The dma stream id is in range from STM32_DMA_STREAM_OFFSET..<dma-requests> */
 	if (stm32_dma_is_ht_irq_active(dma, id)) {
@@ -253,6 +273,8 @@ static void dma_stm32_irq_handler(const struct device *dev, uint32_t id)
 		}
 		stream->dma_callback(dev, stream->user_data, callback_arg, DMA_STATUS_BLOCK);
 	} else if (stm32_dma_is_tc_irq_active(dma, id)) {
+		/* Assuming not cyclic transfer */
+		stream->busy = false;
 		/* Let HAL DMA handle flags on its own */
 		if (!stream->hal_override) {
 			dma_stm32_clear_tc(dma, id);
@@ -260,6 +282,7 @@ static void dma_stm32_irq_handler(const struct device *dev, uint32_t id)
 		stream->dma_callback(dev, stream->user_data, callback_arg, DMA_STATUS_COMPLETE);
 	} else {
 		LOG_ERR("Transfer Error.");
+		stream->busy = false;
 		dma_stm32_dump_stream_irq(dev, id);
 		dma_stm32_clear_stream_irq(dev, id);
 		stream->dma_callback(dev, stream->user_data,
@@ -383,14 +406,13 @@ static int dma_stm32_configure(const struct device *dev,
 		return -EINVAL;
 	}
 
-	/*
-	 * STM32's circular mode will auto reset both source address
-	 * counter and destination address counter.
+	/* Continuous transfers are supported by hardware but not implemented
+	 * by this driver
 	 */
-	if (config->head_block->source_reload_en !=
+	if (config->head_block->source_reload_en ||
 		config->head_block->dest_reload_en) {
-		LOG_ERR("source_reload_en and dest_reload_en must "
-			"be the same.");
+		LOG_ERR("source_reload_en and dest_reload_en not "
+			"implemented.");
 		return -EINVAL;
 	}
 
@@ -468,18 +490,12 @@ static int dma_stm32_configure(const struct device *dev,
 	/* Set the data width, when source_data_size equals dest_data_size */
 	int index = find_lsb_set(config->source_data_size) - 1;
 
-	DMA_InitStruct.SrcDataWidth = table_p_size[index];
+	DMA_InitStruct.SrcDataWidth = table_src_size[index];
 
 	index = find_lsb_set(config->dest_data_size) - 1;
-	DMA_InitStruct.DestDataWidth = table_m_size[index];
+	DMA_InitStruct.DestDataWidth = table_dst_size[index];
 
-	if (stream->source_periph) {
-		DMA_InitStruct.BlkDataLength = config->head_block->block_size /
-					config->source_data_size;
-	} else {
-		DMA_InitStruct.BlkDataLength = config->head_block->block_size /
-					config->dest_data_size;
-	}
+	DMA_InitStruct.BlkDataLength = config->head_block->block_size;
 
 	/* The request ID is stored in the dma_slot */
 	DMA_InitStruct.Request = config->dma_slot;
@@ -487,6 +503,9 @@ static int dma_stm32_configure(const struct device *dev,
 	LL_DMA_Init(dma, dma_stm32_id_to_stream(id), &DMA_InitStruct);
 
 	LL_DMA_EnableIT_TC(dma, dma_stm32_id_to_stream(id));
+	LL_DMA_EnableIT_USE(dma, dma_stm32_id_to_stream(id));
+	LL_DMA_EnableIT_ULE(dma, dma_stm32_id_to_stream(id));
+	LL_DMA_EnableIT_DTE(dma, dma_stm32_id_to_stream(id));
 
 	/* Enable Half-Transfer irq if circular mode is enabled */
 	if (config->head_block->source_reload_en) {
@@ -525,13 +544,7 @@ static int dma_stm32_reload(const struct device *dev, uint32_t id,
 				dma_stm32_id_to_stream(id),
 				src, dst);
 
-	if (stream->source_periph) {
-		LL_DMA_SetBlkDataLength(dma, dma_stm32_id_to_stream(id),
-				     size / stream->src_size);
-	} else {
-		LL_DMA_SetBlkDataLength(dma, dma_stm32_id_to_stream(id),
-				     size / stream->dst_size);
-	}
+	LL_DMA_SetBlkDataLength(dma, dma_stm32_id_to_stream(id), size);
 
 	/* When reloading the dma, the stream is busy again before enabling */
 	stream->busy = true;
@@ -631,6 +644,9 @@ static int dma_stm32_stop(const struct device *dev, uint32_t id)
 	}
 
 	LL_DMA_DisableIT_TC(dma, dma_stm32_id_to_stream(id));
+	LL_DMA_DisableIT_USE(dma, dma_stm32_id_to_stream(id));
+	LL_DMA_DisableIT_ULE(dma, dma_stm32_id_to_stream(id));
+	LL_DMA_DisableIT_DTE(dma, dma_stm32_id_to_stream(id));
 
 	dma_stm32_clear_stream_irq(dev, id);
 	dma_stm32_disable_stream(dma, id);

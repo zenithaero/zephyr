@@ -14,10 +14,6 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(test_main, LOG_LEVEL_DBG);
 
-#ifdef CONFIG_USB_COMPOSITE_DEVICE
-#error Do not use composite configuration
-#endif
-
 /* Linker-defined symbols bound the USB descriptor structs */
 extern struct usb_desc_header __usb_descriptor_start[];
 extern struct usb_desc_header __usb_descriptor_end[];
@@ -39,7 +35,11 @@ struct usb_test_config {
 #define TEST_BULK_EP_MPS		64
 #endif
 
+#if defined(CONFIG_USB_CONFIGURATION_STRING_DESC_ENABLE)
+#define TEST_DESCRIPTOR_TABLE_SPAN	201
+#else
 #define TEST_DESCRIPTOR_TABLE_SPAN	157
+#endif
 
 #define INITIALIZER_IF							\
 	{								\
@@ -207,6 +207,7 @@ ZTEST(desc_sections, test_desc_sections)
 {
 	struct usb_desc_header *head;
 
+	usb_set_config(usb_get_device_descriptor());
 	TC_PRINT("__usb_descriptor_start %p\n", __usb_descriptor_start);
 	TC_PRINT("__usb_descriptor_end %p\n",  __usb_descriptor_end);
 	TC_PRINT("USB Descriptor table span %d\n",

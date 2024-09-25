@@ -13,6 +13,7 @@ import yaml
 import scl
 import logging
 from pathlib import Path
+from natsort import natsorted
 
 from twisterlib.environment import ZEPHYR_BASE
 
@@ -46,9 +47,11 @@ class DUT(object):
                  pre_script=None,
                  post_script=None,
                  post_flash_script=None,
+                 script_param=None,
                  runner=None,
                  flash_timeout=60,
-                 flash_with_test=False):
+                 flash_with_test=False,
+                 flash_before=False):
 
         self.serial = serial
         self.baud = serial_baud or 115200
@@ -56,16 +59,19 @@ class DUT(object):
         self.serial_pty = serial_pty
         self._counter = Value("i", 0)
         self._available = Value("i", 1)
+        self._failures = Value("i", 0)
         self.connected = connected
         self.pre_script = pre_script
         self.id = id
         self.product = product
         self.runner = runner
         self.runner_params = runner_params
+        self.flash_before = flash_before
         self.fixtures = []
         self.post_flash_script = post_flash_script
         self.post_script = post_script
         self.pre_script = pre_script
+        self.script_param = script_param
         self.probe_id = None
         self.notes = None
         self.lock = Lock()
@@ -93,9 +99,27 @@ class DUT(object):
         with self._counter.get_lock():
             self._counter.value = value
 
+    def counter_increment(self, value=1):
+        with self._counter.get_lock():
+            self._counter.value += value
+
+    @property
+    def failures(self):
+        with self._failures.get_lock():
+            return self._failures.value
+
+    @failures.setter
+    def failures(self, value):
+        with self._failures.get_lock():
+            self._failures.value = value
+
+    def failures_increment(self, value=1):
+        with self._failures.get_lock():
+            self._failures.value += value
+
     def to_dict(self):
         d = {}
-        exclude = ['_available', '_counter', 'match']
+        exclude = ['_available', '_counter', '_failures', 'match']
         v = vars(self)
         for k in v.keys():
             if k not in exclude and v[k]:
@@ -117,11 +141,13 @@ class HardwareMap:
         'Atmel Corp.',
         'Texas Instruments',
         'Silicon Labs',
+        'NXP',
         'NXP Semiconductors',
         'Microchip Technology Inc.',
         'FTDI',
         'Digilent',
-        'Microsoft'
+        'Microsoft',
+        'Nuvoton'
     ]
 
     runner_mapping = {
@@ -176,7 +202,8 @@ class HardwareMap:
                                 False,
                                 baud=self.options.device_serial_baud,
                                 flash_timeout=self.options.device_flash_timeout,
-                                flash_with_test=self.options.device_flash_with_test
+                                flash_with_test=self.options.device_flash_with_test,
+                                flash_before=self.options.flash_before,
                                 )
 
             elif self.options.device_serial_pty:
@@ -185,7 +212,8 @@ class HardwareMap:
                                 self.options.pre_script,
                                 True,
                                 flash_timeout=self.options.device_flash_timeout,
-                                flash_with_test=self.options.device_flash_with_test
+                                flash_with_test=self.options.device_flash_with_test,
+                                flash_before=False,
                                 )
 
             # the fixtures given by twister command explicitly should be assigned to each DUT
@@ -198,17 +226,17 @@ class HardwareMap:
     def summary(self, selected_platforms):
         print("\nHardware distribution summary:\n")
         table = []
-        header = ['Board', 'ID', 'Counter']
+        header = ['Board', 'ID', 'Counter', 'Failures']
         for d in self.duts:
             if d.connected and d.platform in selected_platforms:
-                row = [d.platform, d.id, d.counter]
+                row = [d.platform, d.id, d.counter, d.failures]
                 table.append(row)
         print(tabulate(table, headers=header, tablefmt="github"))
 
 
-    def add_device(self, serial, platform, pre_script, is_pty, baud=None, flash_timeout=60, flash_with_test=False):
+    def add_device(self, serial, platform, pre_script, is_pty, baud=None, flash_timeout=60, flash_with_test=False, flash_before=False):
         device = DUT(platform=platform, connected=True, pre_script=pre_script, serial_baud=baud,
-                     flash_timeout=flash_timeout, flash_with_test=flash_with_test
+                     flash_timeout=flash_timeout, flash_with_test=flash_with_test, flash_before=flash_before
                     )
         if is_pty:
             device.serial_pty = serial
@@ -222,12 +250,16 @@ class HardwareMap:
         duts = scl.yaml_load_verify(map_file, hwm_schema)
         for dut in duts:
             pre_script = dut.get('pre_script')
+            script_param = dut.get('script_param')
             post_script = dut.get('post_script')
             post_flash_script = dut.get('post_flash_script')
             flash_timeout = dut.get('flash_timeout') or self.options.device_flash_timeout
             flash_with_test = dut.get('flash_with_test')
             if flash_with_test is None:
                 flash_with_test = self.options.device_flash_with_test
+            flash_before = dut.get('flash_before')
+            if flash_before is None:
+                flash_before = self.options.flash_before and (not (flash_with_test or serial_pty))
             platform  = dut.get('platform')
             id = dut.get('id')
             runner = dut.get('runner')
@@ -250,8 +282,10 @@ class HardwareMap:
                           serial_baud=baud,
                           connected=connected,
                           pre_script=pre_script,
+                          flash_before=flash_before,
                           post_script=post_script,
                           post_flash_script=post_flash_script,
+                          script_param=script_param,
                           flash_timeout=flash_timeout,
                           flash_with_test=flash_with_test)
             new_dut.fixtures = fixtures
@@ -278,15 +312,18 @@ class HardwareMap:
             def readlink(link):
                 return str((by_id / link).resolve())
 
-            persistent_map = {readlink(link): str(link)
-                              for link in by_id.iterdir()}
+            if by_id.exists():
+                persistent_map = {readlink(link): str(link)
+                                  for link in by_id.iterdir()}
+            else:
+                persistent_map = {}
         else:
             persistent_map = {}
 
         serial_devices = list_ports.comports()
         logger.info("Scanning connected hardware...")
         for d in serial_devices:
-            if d.manufacturer in self.manufacturer:
+            if d.manufacturer and d.manufacturer.casefold() in [m.casefold() for m in self.manufacturer]:
 
                 # TI XDS110 can have multiple serial devices for a single board
                 # assume endpoint 0 is the serial, skip all others
@@ -321,7 +358,7 @@ class HardwareMap:
 
     def save(self, hwm_file):
         # use existing map
-        self.detected.sort(key=lambda x: x.serial or '')
+        self.detected = natsorted(self.detected, key=lambda x: x.serial or '')
         if os.path.exists(hwm_file):
             with open(hwm_file, 'r') as yaml_file:
                 hwm = yaml.load(yaml_file, Loader=SafeLoader)

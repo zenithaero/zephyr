@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Alexander Kozhinov <AlexanderKozhinov@yandex.com>
+ * Copyright (c) 2020 Alexander Kozhinov <ak.alexander.kozhinov@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,12 +28,6 @@
 			};
 		};
 
-		adc3: adc@58026000 {
-			vbat-channel = <17>;
-			temp-channel = <18>;
-			vref-channel = <19>;
-		};
-
 		dmamux1: dmamux@40020800 {
 			dma-requests= <107>;
 		};
@@ -48,6 +42,7 @@
 			interrupts = <88 0>, <89 0>;
 			interrupt-names = "ltdc", "ltdc_er";
 			clocks = <&rcc STM32_CLOCK_BUS_APB3 0x00000008>;
+			resets = <&rctl STM32_RESET(APB3, 4U)>;
 			status = "disabled";
 		};
 

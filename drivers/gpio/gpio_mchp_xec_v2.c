@@ -11,14 +11,16 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/dt-bindings/pinctrl/mchp-xec-pinctrl.h>
 #include <soc.h>
-#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
 #include <zephyr/irq.h>
 
 #include <zephyr/drivers/gpio/gpio_utils.h>
 
 #define XEC_GPIO_EDGE_DLY_COUNT		4
+
+LOG_MODULE_REGISTER(gpio, CONFIG_GPIO_LOG_LEVEL);
 
 static const uint32_t valid_ctrl_masks[NUM_MCHP_GPIO_PORTS] = {
 	(MCHP_GPIO_PORT_A_BITMAP),
@@ -94,6 +96,11 @@ static int gpio_xec_validate_flags(gpio_flags_t flags)
 		return -ENOTSUP;
 	}
 
+	if ((flags & (GPIO_INPUT | GPIO_OUTPUT))
+	    == (GPIO_INPUT | GPIO_OUTPUT)) {
+		return -ENOTSUP;
+	}
+
 	if ((flags & GPIO_OUTPUT_INIT_LOW) && (flags & GPIO_OUTPUT_INIT_HIGH)) {
 		return -EINVAL;
 	}
@@ -136,6 +143,12 @@ static int gpio_xec_configure(const struct device *dev,
 
 	pcr1_addr = pin_ctrl_addr(dev, pin);
 	pcr1 = sys_read32(pcr1_addr);
+
+	/* Check if pin is in GPIO mode */
+	if (MCHP_GPIO_CTRL_MUX_GET(pcr1) != MCHP_GPIO_CTRL_MUX_F0) {
+		LOG_WRN("Port:%d pin:0x%x not in GPIO mode. CTRL[%x]=%x", config->port_num, pin,
+			(uint32_t)pcr1_addr, pcr1);
+	}
 
 	if (flags == GPIO_DISCONNECTED) {
 		pcr1 = (pcr1 & ~MCHP_GPIO_CTRL_PWRG_MASK) | MCHP_GPIO_CTRL_PWRG_OFF;

@@ -12,6 +12,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/audio/tbs.h>
 
 enum {
@@ -32,7 +33,7 @@ static int process_profile_connection(struct bt_conn *conn)
 	int err = 0;
 
 	if (!atomic_test_and_set_bit(flags_for_conn, CCP_FLAG_GTBS_DISCOVER)) {
-		err = bt_tbs_client_discover(conn, true);
+		err = bt_tbs_client_discover(conn);
 		if (err != 0) {
 			printk("bt_tbs_client_discover (err %d)\n", err);
 		}
@@ -61,7 +62,7 @@ static int process_profile_connection(struct bt_conn *conn)
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
-		printk("Connection failed (err %d)\n", err);
+		printk("Connection failed, err %d %s\n", err, bt_hci_err_to_str(err));
 		return;
 	}
 
@@ -154,7 +155,5 @@ struct bt_tbs_client_cb tbs_client_cb = {
 
 int ccp_call_ctrl_init(void)
 {
-	bt_tbs_client_register_cb(&tbs_client_cb);
-
-	return 0;
+	return bt_tbs_client_register_cb(&tbs_client_cb);
 }

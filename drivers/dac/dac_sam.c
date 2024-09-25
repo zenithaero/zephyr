@@ -85,6 +85,10 @@ static int dac_sam_channel_setup(const struct device *dev,
 		return -ENOTSUP;
 	}
 
+	if (channel_cfg->internal) {
+		return -ENOTSUP;
+	}
+
 	/* Enable Channel */
 	dac->DACC_CHER = DACC_CHER_CH0 << channel_cfg->channel_id;
 
@@ -104,6 +108,11 @@ static int dac_sam_write_value(const struct device *dev, uint8_t channel,
 
 	if (dac->DACC_IMR & (DACC_IMR_TXRDY0 << channel)) {
 		/* Attempting to send data on channel that's already in use */
+		return -EINVAL;
+	}
+
+	if (value >= BIT(12)) {
+		LOG_ERR("value %d out of range", value);
 		return -EINVAL;
 	}
 

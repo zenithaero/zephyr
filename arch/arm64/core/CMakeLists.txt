@@ -4,10 +4,12 @@ zephyr_library()
 
 zephyr_library_sources(
   cpu_idle.S
+  early_mem_funcs.S
   fatal.c
   irq_init.c
   irq_manage.c
   prep_c.c
+  reboot.c
   reset.S
   reset.c
   switch.S
@@ -27,6 +29,7 @@ if(${SRAM_LENGTH} GREATER 11 OR ${KERNEL_VM_LENGTH} GREATER 11)
   zephyr_cc_option(-mcmodel=large)
 endif()
 
+zephyr_library_sources_ifdef(CONFIG_LLEXT elf.c)
 zephyr_library_sources_ifdef(CONFIG_FPU_SHARING fpu.c fpu.S)
 zephyr_library_sources_ifdef(CONFIG_ARM_MMU mmu.c mmu.S)
 zephyr_library_sources_ifdef(CONFIG_ARM_MPU cortex_r/arm_mpu.c)
@@ -37,11 +40,13 @@ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE tls.c)
 zephyr_library_sources_ifdef(CONFIG_HAS_ARM_SMCCC smccc-call.S)
 zephyr_library_sources_ifdef(CONFIG_AARCH64_IMAGE_HEADER header.S)
 zephyr_library_sources_ifdef(CONFIG_SEMIHOST semihost.c)
+zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP coredump.c)
 if ((CONFIG_MP_MAX_NUM_CPUS GREATER 1) OR (CONFIG_SMP))
   zephyr_library_sources(smp.c)
 endif ()
 
 zephyr_cc_option_ifdef(CONFIG_USERSPACE -mno-outline-atomics)
+zephyr_cc_option_ifdef(CONFIG_FRAME_POINTER -mno-omit-leaf-frame-pointer)
 
 # GCC may generate ldp/stp instructions with the Advanced SIMD Qn registers for
 # consecutive 32-byte loads and stores. Saving and restoring the Advanced SIMD
@@ -52,4 +57,12 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
   zephyr_cc_option(-moverride=tune=no_ldp_stp_qregs)
 endif()
 
-add_subdirectory_ifdef(CONFIG_SOC_XENVM xen)
+add_subdirectory_ifdef(CONFIG_XEN xen)
+
+if(CONFIG_GEN_SW_ISR_TABLE)
+  if(CONFIG_DYNAMIC_INTERRUPTS)
+    zephyr_linker_sources(RWDATA swi_tables.ld)
+  else()
+    zephyr_linker_sources(RODATA swi_tables.ld)
+  endif()
+endif()

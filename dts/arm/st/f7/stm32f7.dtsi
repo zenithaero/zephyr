@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018 Yurii Hamann
  * Copyright (c) 2019 Centaur Analytics, Inc
+ * Copyright (c) 2024 STMicroelectronics
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,6 +17,8 @@
 #include <zephyr/dt-bindings/reset/stm32f2_4_7_reset.h>
 #include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/memory-controller/stm32-fmc-sdram.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 #include <freq.h>
 
 / {
@@ -28,7 +31,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		cpu@0 {
+		cpu0: cpu@0 {
 			device_type = "cpu";
 			compatible = "arm,cortex-m7";
 			reg = <0>;
@@ -38,16 +41,15 @@
 			mpu: mpu@e000ed90 {
 				compatible = "arm,armv7m-mpu";
 				reg = <0xe000ed90 0x40>;
-				arm,num-mpu-regions = <8>;
 			};
 		};
 	};
 
-	quadspi_memory: memory@90000000 {
+	quadspi_memory: memory-placeholder@90000000 {
 		compatible = "zephyr,memory-region", "mmio-sram";
 		reg = <0x90000000 DT_SIZE_M(256)>;
-		zephyr,memory-region = "QSPI";
-		zephyr,memory-region-mpu = "EXTMEM";
+		zephyr,memory-region = "QSPI_PLACEHOLDER";
+		zephyr,memory-attr = <( DT_MEM_ARM(ATTR_MPU_EXTMEM) )>;
 	};
 
 	clocks {
@@ -82,6 +84,18 @@
 		pll: pll {
 			#clock-cells = <0>;
 			compatible = "st,stm32f7-pll-clock";
+			status = "disabled";
+		};
+	};
+
+	mcos {
+		mco1: mco1 {
+			compatible = "st,stm32-clock-mco";
+			status = "disabled";
+		};
+
+		mco2: mco2 {
+			compatible = "st,stm32-clock-mco";
 			status = "disabled";
 		};
 	};
@@ -396,14 +410,12 @@
 		};
 
 		can1: can@40006400 {
-			compatible = "st,stm32-can";
+			compatible = "st,stm32-bxcan";
 			reg = <0x40006400 0x400>;
 			interrupts = <19 0>, <20 0>, <21 0>, <22 0>;
 			interrupt-names = "TX", "RX0", "RX1", "SCE";
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x02000000>;
 			status = "disabled";
-			sjw = <1>;
-			sample-point = <875>;
 		};
 
 		timers1: timers@40010000 {
@@ -714,7 +726,8 @@
 			num-bidir-endpoints = <9>;
 			ram-size = <4096>;
 			maximum-speed = "full-speed";
-			clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x20000000>;
+			clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x20000000>,
+				 <&rcc STM32_SRC_PLL_Q CK48M_SEL(0)>;
 			phys = <&otghs_fs_phy>;
 			status = "disabled";
 		};
@@ -725,6 +738,8 @@
 			interrupts = <41 0>;
 			clocks = <&rcc STM32_CLOCK_BUS_APB1 0x10000000>;
 			prescaler = <32768>;
+			alarms-count = <2>;
+			alrm-exti-line = <17>;
 			status = "disabled";
 
 			bbram: backup_regs {
@@ -741,15 +756,13 @@
 			interrupts = <18 0>;
 			status = "disabled";
 			#io-channel-cells = <1>;
-			/* Temperature and VBAT sensor share channel 18 */
-			temp-channel = <18>;
-			vbat-channel = <18>;
-			vref-channel = <17>;
 			resolutions = <STM32_ADC_RES(12, 0x00)
 				       STM32_ADC_RES(10, 0x01)
 				       STM32_ADC_RES(8, 0x02)
 				       STM32_ADC_RES(6, 0x03)>;
 			sampling-times = <3 15 28 56 84 112 144 480>;
+			st,adc-clock-source = <SYNC>;
+			st,adc-sequencer = <FULLY_CONFIGURABLE>;
 		};
 
 		adc2: adc@40012100 {
@@ -764,6 +777,8 @@
 				       STM32_ADC_RES(8, 0x02)
 				       STM32_ADC_RES(6, 0x03)>;
 			sampling-times = <3 15 28 56 84 112 144 480>;
+			st,adc-clock-source = <SYNC>;
+			st,adc-sequencer = <FULLY_CONFIGURABLE>;
 		};
 
 		adc3: adc@40012200 {
@@ -778,6 +793,8 @@
 				       STM32_ADC_RES(8, 0x02)
 				       STM32_ADC_RES(6, 0x03)>;
 			sampling-times = <3 15 28 56 84 112 144 480>;
+			st,adc-clock-source = <SYNC>;
+			st,adc-sequencer = <FULLY_CONFIGURABLE>;
 		};
 
 		dac1: dac@40007400 {
@@ -858,7 +875,7 @@
 
 	vref: vref {
 		compatible = "st,stm32-vref";
-		vrefint-cal-addr = <0x1FFF7A2A>;
+		vrefint-cal-addr = <0x1FF0F44A>;
 		vrefint-cal-mv = <3300>;
 		io-channels = <&adc1 17>;
 		status = "disabled";
@@ -879,6 +896,30 @@
 	otgfs_phy: otgfs_phy {
 		compatible = "usb-nop-xceiv";
 		#phy-cells = <0>;
+	};
+
+	smbus1: smbus1 {
+		compatible = "st,stm32-smbus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c = <&i2c2>;
+		status = "disabled";
+	};
+
+	smbus2: smbus2 {
+		compatible = "st,stm32-smbus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c = <&i2c2>;
+		status = "disabled";
+	};
+
+	smbus3: smbus3 {
+		compatible = "st,stm32-smbus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		i2c = <&i2c3>;
+		status = "disabled";
 	};
 };
 

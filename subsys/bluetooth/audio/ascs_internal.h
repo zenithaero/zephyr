@@ -3,11 +3,24 @@
 
  * Copyright (c) 2020 Intel Corporation
  * Copyright (c) 2022-2023 Nordic Semiconductor ASA
+ * Copyright (c) 2024 Demant A/S
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#ifndef BT_ASCS_INTERNAL_H
+#define BT_ASCS_INTERNAL_H
+
+#include <zephyr/bluetooth/audio/audio.h>
+#include <zephyr/bluetooth/audio/bap.h>
+#include <zephyr/bluetooth/conn.h>
+
 #define BT_ASCS_ASE_ID_NONE              0x00
+
+/* The number of ASEs in the notification when the opcode is unsupported or the length of the
+ * control point write request is incorrect
+ */
+#define BT_ASCS_UNSUPP_OR_LENGTH_ERR_NUM_ASE 0xFFU
 
 /* Transport QoS Packing */
 #define BT_ASCS_QOS_PACKING_SEQ          0x00
@@ -335,9 +348,17 @@ static inline const char *bt_ascs_reason_str(uint8_t reason)
 int bt_ascs_init(const struct bt_bap_unicast_server_cb *cb);
 void bt_ascs_cleanup(void);
 
-void ascs_ep_set_state(struct bt_bap_ep *ep, uint8_t state);
+int ascs_ep_set_state(struct bt_bap_ep *ep, uint8_t state);
 
-int bt_ascs_config_ase(struct bt_conn *conn, struct bt_bap_stream *stream, struct bt_codec *codec,
-		       const struct bt_codec_qos_pref *qos_pref);
+int bt_ascs_config_ase(struct bt_conn *conn, struct bt_bap_stream *stream,
+		       struct bt_audio_codec_cfg *codec_cfg,
+		       const struct bt_audio_codec_qos_pref *qos_pref);
+int bt_ascs_disable_ase(struct bt_bap_ep *ep);
+int bt_ascs_release_ase(struct bt_bap_ep *ep);
 
 void bt_ascs_foreach_ep(struct bt_conn *conn, bt_bap_ep_func_t func, void *user_data);
+
+int bt_ascs_register(uint8_t snk_cnt, uint8_t src_cnt);
+int bt_ascs_unregister(void);
+
+#endif /* BT_ASCS_INTERNAL_H */

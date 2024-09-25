@@ -8,8 +8,14 @@ project(mesh)
 
 target_sources(app PRIVATE src/main.c)
 
-if (BOARD STREQUAL bbc_microbit)
+if(CONFIG_BOARD_BBC_MICROBIT)
   target_sources(app PRIVATE src/microbit.c)
 else()
   target_sources(app PRIVATE src/board.c)
+endif()
+
+if (CONFIG_BUILD_WITH_TFM)
+  target_include_directories(app PRIVATE
+    $<TARGET_PROPERTY:tfm,TFM_BINARY_DIR>/api_ns/interface/include
+  )
 endif()

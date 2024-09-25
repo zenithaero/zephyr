@@ -8,6 +8,7 @@
 #include <zephyr/drivers/ipm.h>
 #include <zephyr/drivers/console/ipm_console.h>
 #include <zephyr/device.h>
+#include <zephyr/misc/lorem_ipsum.h>
 #include <zephyr/init.h>
 #include <stdio.h>
 
@@ -24,7 +25,8 @@
 #define DEST    IPM_CONSOLE_STDOUT
 #endif
 
-#define INIT_PRIO_IPM_SEND 50
+#define INIT_PRIO_IPM_SEND 40
+#define INIT_PRIO_IPM_RECV 50
 
 extern struct ipm_driver_api ipm_dummy_api;
 
@@ -44,7 +46,7 @@ static struct ipm_console_sender_config_info sender_config = {
 };
 DEVICE_DEFINE(ipm_console_send0, "ipm_send0", ipm_console_sender_init,
 	      NULL, NULL, &sender_config,
-	      APPLICATION, INIT_PRIO_IPM_SEND, NULL);
+	      POST_KERNEL, INIT_PRIO_IPM_SEND, NULL);
 
 /* Receiving side of the console IPM driver. These numbers are
  * more or less arbitrary
@@ -70,7 +72,7 @@ static struct ipm_console_receiver_config_info receiver_config = {
 struct ipm_console_receiver_runtime_data receiver_data;
 DEVICE_DEFINE(ipm_console_recv0, "ipm_recv0", ipm_console_receiver_init,
 	      NULL, &receiver_data, &receiver_config,
-	      APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, NULL);
+	      POST_KERNEL, INIT_PRIO_IPM_RECV, NULL);
 
 static const char thestr[] = "everything is awesome\n";
 
@@ -90,14 +92,7 @@ int main(void)
 	}
 
 	/* Now do this through printf() to exercise the sender */
-	printf("Lorem ipsum dolor sit amet, consectetur adipiscing elit, "
-	       "sed do eiusmod tempor incididunt ut labore et dolore magna "
-	       "aliqua. Ut enim ad minim veniam, quis nostrud exercitation "
-	       "ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis "
-	       "aute irure dolor in reprehenderit in voluptate velit esse "
-	       "cillum dolore eu fugiat nulla pariatur. Excepteur sint "
-	       "occaecat cupidatat non proident, sunt in culpa qui officia "
-	       "deserunt mollit anim id est laborum.\n");
+	printf(LOREM_IPSUM_SHORT "\n");
 
 	/* XXX how to tell if something was actually printed out for
 	 * automation purposes?

@@ -17,7 +17,7 @@
  */
 
 #if (defined(CONFIG_ARM_MPU) && !defined(CONFIG_CPU_HAS_NXP_MPU))
-#include <zephyr/arch/arm/aarch32/cortex_m/cmsis.h>
+#include <cmsis_core.h>
 void disable_mpu_rasr_xn(void)
 {
 	uint32_t index;
@@ -53,8 +53,6 @@ void  z_early_memcpy(void *dst, const void *src, size_t n)
 		*(d_byte++) = *(s_byte++);
 		n--;
 	}
-
-	return (void)dst;
 }
 
 __boot_func
@@ -69,7 +67,6 @@ void z_early_memset(void *dst, int c, size_t n)
 		*(d_byte++) = c_byte;
 		n--;
 	}
-	return (void)dst;
 }
 
 void *relocate_code_setup(void)

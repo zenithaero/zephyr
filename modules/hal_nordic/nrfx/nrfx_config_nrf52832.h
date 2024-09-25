@@ -35,9 +35,9 @@
  *
  * Integer value.
  * Supported values:
- * - RC                  = 0
- * - XTAL                = 1
- * - Synth               = 2
+ * - RC    = 0
+ * - XTAL  = 1
+ * - Synth = 2
  * - External Low Swing  = 131073
  * - External Full Swing = 196609
  */
@@ -626,14 +626,7 @@
  * @brief NRFX_PWM_NRF52_ANOMALY_109_EGU_INSTANCE - EGU instance used by the nRF52 Anomaly 109
  * workaround for PWM.
  *
- * Integer value.
- * Supported values:
- * - EGU0 = 0
- * - EGU1 = 1
- * - EGU2 = 2
- * - EGU3 = 3
- * - EGU4 = 4
- * - EGU5 = 5
+ * Integer value. Minimum: 0 Maximum: 5
  */
 #ifndef NRFX_PWM_NRF52_ANOMALY_109_EGU_INSTANCE
 #define NRFX_PWM_NRF52_ANOMALY_109_EGU_INSTANCE 5
@@ -1508,6 +1501,15 @@
  */
 #ifndef NRFX_UARTE_ENABLED
 #define NRFX_UARTE_ENABLED 0
+#endif
+
+/**
+ * @brief NRFX_UARTE_RX_FIFO_FLUSH_WORKAROUND_MAGIC_BYTE
+ *
+ * Integer value. Minimum: 0. Maximum: 255.
+ */
+#ifndef NRFX_UARTE_RX_FIFO_FLUSH_WORKAROUND_MAGIC_BYTE
+#define NRFX_UARTE_RX_FIFO_FLUSH_WORKAROUND_MAGIC_BYTE 171
 #endif
 
 /**

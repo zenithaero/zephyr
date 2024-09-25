@@ -70,19 +70,24 @@ uint32_t table_ll_channel[] = {
 	LISTIFY(DT_INST_PROP(0, dma_channels), DMAMUX_CHANNEL, (,))
 };
 
-uint32_t (*func_ll_is_active_so[])(DMAMUX_Channel_TypeDef *DMAMUXx) = {
+#if !defined(CONFIG_SOC_SERIES_STM32G0X)
+#define dmamux_channel_typedef DMAMUX_Channel_TypeDef
+#else
+#define dmamux_channel_typedef const DMAMUX_Channel_TypeDef
+#endif
+uint32_t (*func_ll_is_active_so[])(dmamux_channel_typedef * DMAMUXx) = {
 	LISTIFY(DT_INST_PROP(0, dma_channels), IS_ACTIVE_FLAG_SOX, (,))
 };
 
-void (*func_ll_clear_so[])(DMAMUX_Channel_TypeDef *DMAMUXx) = {
+void (*func_ll_clear_so[])(dmamux_channel_typedef * DMAMUXx) = {
 	LISTIFY(DT_INST_PROP(0, dma_channels), CLEAR_FLAG_SOX, (,))
 };
 
-uint32_t (*func_ll_is_active_rgo[])(DMAMUX_Channel_TypeDef *DMAMUXx) = {
+uint32_t (*func_ll_is_active_rgo[])(dmamux_channel_typedef * DMAMUXx) = {
 	LISTIFY(DT_INST_PROP(0, dma_generators), IS_ACTIVE_FLAG_RGOX, (,))
 };
 
-void (*func_ll_clear_rgo[])(DMAMUX_Channel_TypeDef *DMAMUXx) = {
+void (*func_ll_clear_rgo[])(dmamux_channel_typedef * DMAMUXx) = {
 	LISTIFY(DT_INST_PROP(0, dma_generators), CLEAR_FLAG_RGOX, (,))
 };
 
@@ -422,7 +427,13 @@ DEVICE_DT_INST_DEFINE(index,						\
 		    &dmamux_stm32_init,					\
 		    NULL,						\
 		    &dmamux_stm32_data_##index, &dmamux_stm32_config_##index,\
-		    PRE_KERNEL_1, CONFIG_DMA_INIT_PRIORITY,		\
+		    PRE_KERNEL_1, CONFIG_DMAMUX_STM32_INIT_PRIORITY,	\
 		    &dma_funcs);
 
 DT_INST_FOREACH_STATUS_OKAY(DMAMUX_INIT)
+
+/*
+ * Make sure that this driver is initialized after the DMA driver (higher priority)
+ */
+BUILD_ASSERT(CONFIG_DMAMUX_STM32_INIT_PRIORITY >= CONFIG_DMA_INIT_PRIORITY,
+	     "CONFIG_DMAMUX_STM32_INIT_PRIORITY must be higher than CONFIG_DMA_INIT_PRIORITY");

@@ -73,9 +73,11 @@ static int parse_helper(const struct shell *sh, size_t *argc,
 
 static int cmd_erase(const struct shell *sh, size_t argc, char *argv[])
 {
+	int result = -ENOTSUP;
+
+#if defined(CONFIG_FLASH_HAS_EXPLICIT_ERASE)
 	const struct device *flash_dev;
 	uint32_t page_addr;
-	int result;
 	uint32_t size;
 
 	result = parse_helper(sh, &argc, &argv, &flash_dev, &page_addr);
@@ -106,6 +108,7 @@ static int cmd_erase(const struct shell *sh, size_t argc, char *argv[])
 	} else {
 		shell_print(sh, "Erase success.");
 	}
+#endif
 
 	return result;
 }
@@ -663,7 +666,7 @@ static int cmd_load(const struct shell *sh, size_t argc, char *argv[])
 	flash_load_boff = 0;
 	flash_load_chunk = 0;
 
-	shell_print(sh, "Loading %d bytes starting at address %x", size, addr);
+	shell_print(sh, "Send %d bytes to complete flash load command", size);
 
 	set_bypass(sh, bypass_cb);
 	return 0;

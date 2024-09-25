@@ -31,10 +31,14 @@ extern "C" {
 
 /**
  * @defgroup timeutil_apis Time Utility APIs
+ * @ingroup utilities
  * @defgroup timeutil_repr_apis Time Representation APIs
  * @ingroup timeutil_apis
  * @{
  */
+
+/* Base Year value use in calculations in "timeutil_timegm64" API */
+#define TIME_UTILS_BASE_YEAR 1900
 
 /**
  * @brief Convert broken-down time to a POSIX epoch offset in seconds.

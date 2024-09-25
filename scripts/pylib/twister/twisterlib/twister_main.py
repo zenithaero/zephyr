@@ -3,6 +3,7 @@
 # Copyright (c) 2022 Google
 # SPDX-License-Identifier: Apache-2.0
 
+import argparse
 import colorama
 import logging
 import os
@@ -12,6 +13,7 @@ import time
 
 from colorama import Fore
 
+from twisterlib.statuses import TwisterStatus
 from twisterlib.testplan import TestPlan
 from twisterlib.reports import Reporting
 from twisterlib.hardwaremap import HardwareMap
@@ -24,7 +26,7 @@ logger = logging.getLogger("twister")
 logger.setLevel(logging.DEBUG)
 
 
-def setup_logging(outdir, log_file, verbose, timestamps):
+def setup_logging(outdir, log_file, log_level, timestamps):
     # create file handler which logs even debug messages
     if log_file:
         fh = logging.FileHandler(log_file)
@@ -35,11 +37,7 @@ def setup_logging(outdir, log_file, verbose, timestamps):
 
     # create console handler with a higher log level
     ch = logging.StreamHandler()
-
-    if verbose > 1:
-        ch.setLevel(logging.DEBUG)
-    else:
-        ch.setLevel(logging.INFO)
+    ch.setLevel(getattr(logging, log_level))
 
     # create formatter and add it to the handlers
     if timestamps:
@@ -62,7 +60,7 @@ def init_color(colorama_strip):
     colorama.init(strip=colorama_strip)
 
 
-def main(options):
+def main(options: argparse.Namespace, default_options: argparse.Namespace):
     start_time = time.time()
 
     # Configure color output
@@ -73,7 +71,7 @@ def main(options):
 
     previous_results = None
     # Cleanup
-    if options.no_clean or options.only_failed or options.test_only:
+    if options.no_clean or options.only_failed or options.test_only or options.report_summary is not None:
         if os.path.exists(options.outdir):
             print("Keeping artifacts untouched")
     elif options.last_metrics:
@@ -94,6 +92,9 @@ def main(options):
                     print("Renaming output directory to {}".format(new_out))
                     shutil.move(options.outdir, new_out)
                     break
+            else:
+                sys.exit(f"Too many '{options.outdir}.*' directories. Run either with --no-clean, "
+                         "or --clobber-output, or delete these directories manually.")
 
     previous_results_file = None
     os.makedirs(options.outdir, exist_ok=True)
@@ -102,10 +103,9 @@ def main(options):
         with open(previous_results_file, "w") as fp:
             fp.write(previous_results)
 
-    VERBOSE = options.verbose
-    setup_logging(options.outdir, options.log_file, VERBOSE, options.timestamps)
+    setup_logging(options.outdir, options.log_file, options.log_level, options.timestamps)
 
-    env = TwisterEnv(options)
+    env = TwisterEnv(options, default_options)
     env.discover()
 
     hwm = HardwareMap(env)
@@ -131,18 +131,14 @@ def main(options):
         logger.error(f"{e}")
         return 1
 
-    if options.list_tests and options.platform:
-        tplan.report_platform_tests(options.platform)
-        return 0
-
-    if VERBOSE > 1:
+    if options.verbose > 1:
         # if we are using command line platform filter, no need to list every
         # other platform as excluded, we know that already.
         # Show only the discards that apply to the selected platforms on the
         # command line
 
         for i in tplan.instances.values():
-            if i.status == "filtered":
+            if i.status == TwisterStatus.FILTER:
                 if options.platform and i.platform.name not in options.platform:
                     continue
                 logger.debug(
@@ -155,17 +151,20 @@ def main(options):
                     )
                 )
 
-    if options.report_excluded:
-        tplan.report_excluded_tests()
-        return 0
-
     report = Reporting(tplan, env)
     plan_file = os.path.join(options.outdir, "testplan.json")
     if not os.path.exists(plan_file):
-        report.json_report(plan_file)
+        report.json_report(plan_file, env.version)
 
     if options.save_tests:
-        report.json_report(options.save_tests)
+        report.json_report(options.save_tests, env.version)
+        return 0
+
+    if options.report_summary is not None:
+        if options.report_summary < 0:
+            logger.error("The report summary value cannot be less than 0")
+            return 1
+        report.synopsis()
         return 0
 
     if options.device_testing and not options.build_only:
@@ -202,14 +201,15 @@ def main(options):
 
     duration = time.time() - start_time
 
-    if VERBOSE > 1:
+    if options.verbose > 1:
         runner.results.summary()
 
     report.summary(runner.results, options.disable_unrecognized_section_test, duration)
 
+    coverage_completed = True
     if options.coverage:
         if not options.build_only:
-            run_coverage(tplan, options)
+            coverage_completed = run_coverage(tplan, options)
         else:
             logger.info("Skipping coverage report generation due to --build-only.")
 
@@ -235,6 +235,7 @@ def main(options):
         runner.results.failed
         or runner.results.error
         or (tplan.warnings and options.warnings_as_errors)
+        or (options.coverage and not coverage_completed)
     ):
         return 1
 
