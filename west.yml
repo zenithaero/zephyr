@@ -10,7 +10,7 @@
 # tree application directory, which would pull this zephyr repository
 # in as an ordinary project.
 #
-# You can pass your manifest repositories to west init when creating a
+# You  pass your manifest repositories to west init when creating a
 # new Zephyr installation. See the west documentation for more
 # information.
 
@@ -29,6 +29,9 @@ manifest:
   #
   # Please add items below based on alphabetical order
   projects:
+    - name: canopennode
+      revision: dec12fa3f0d790cafa8414a4c2930ea71ab72ffd
+      path: modules/lib/canopennode
     # - name: acpica
     #   revision: 8d24867bc9c9d81c81eeac59391cda59333affd4
     #   path: modules/lib/acpica
