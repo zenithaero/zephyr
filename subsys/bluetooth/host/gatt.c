@@ -174,9 +174,15 @@ static ssize_t write_appearance(struct bt_conn *conn, const struct bt_gatt_attr 
 }
 #endif /* CONFIG_BT_DEVICE_APPEARANCE_GATT_WRITABLE */
 
-#if CONFIG_BT_DEVICE_APPEARANCE_GATT_WRITABLE
+#if defined(CONFIG_BT_DEVICE_APPEARANCE_GATT_WRITABLE)
 	#define GAP_APPEARANCE_PROPS (BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE)
+#if defined(CONFIG_DEVICE_APPEARANCE_GATT_WRITABLE_AUTHEN)
 	#define GAP_APPEARANCE_PERMS (BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_AUTHEN)
+#elif defined(CONFIG_BT_DEVICE_APPEARANCE_GATT_WRITABLE_ENCRYPT)
+	#define GAP_APPEARANCE_PERMS (BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_ENCRYPT)
+#else
+	#define GAP_APPEARANCE_PERMS (BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+#endif
 	#define GAP_APPEARANCE_WRITE_HANDLER write_appearance
 #else
 	#define GAP_APPEARANCE_PROPS BT_GATT_CHRC_READ
@@ -3469,10 +3475,24 @@ bool bt_gatt_is_subscribed(struct bt_conn *conn,
 
 	/* Check if attribute is a characteristic declaration */
 	if (!bt_uuid_cmp(attr->uuid, BT_UUID_GATT_CHRC)) {
-		struct bt_gatt_chrc *chrc = attr->user_data;
+		uint8_t properties;
+		ssize_t len;
 
-		if (!(chrc->properties &
-			(BT_GATT_CHRC_NOTIFY | BT_GATT_CHRC_INDICATE))) {
+		CHECKIF(!attr->read) {
+			LOG_ERR("Read method not set");
+			return false;
+		}
+		/* The charactestic properties is the first byte of the attribute value */
+		len = attr->read(NULL, attr, &properties, 1, 0);
+		if (len < 0) {
+			LOG_ERR("Failed to read attribute (err %zd)", len);
+			return false;
+		} else if (len != 1) {
+			LOG_ERR("Invalid read length: %zd", len);
+			return false;
+		}
+
+		if (!(properties & (BT_GATT_CHRC_NOTIFY | BT_GATT_CHRC_INDICATE))) {
 			/* Characteristic doesn't support subscription */
 			return false;
 		}
@@ -5486,7 +5506,7 @@ int bt_gatt_subscribe(struct bt_conn *conn,
 		int err;
 
 #if defined(CONFIG_BT_GATT_AUTO_DISCOVER_CCC)
-		if (!params->ccc_handle) {
+		if (params->ccc_handle == BT_GATT_AUTO_DISCOVER_CCC_HANDLE) {
 			return gatt_ccc_discover(conn, params);
 		}
 #endif

@@ -24,6 +24,7 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/att.h>
 #include <zephyr/bluetooth/hci_types.h>
+#include <zephyr/bluetooth/iso.h>
 #include <zephyr/bluetooth/l2cap.h>
 #include <zephyr/bluetooth/buf.h>
 #include <zephyr/bluetooth/uuid.h>
@@ -262,8 +263,7 @@ static int parse_recv_state(const void *data, uint16_t length,
 			return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 		}
 
-		broadcast_code = net_buf_simple_pull_mem(&buf,
-							 BT_AUDIO_BROADCAST_CODE_SIZE);
+		broadcast_code = net_buf_simple_pull_mem(&buf, BT_ISO_BROADCAST_CODE_SIZE);
 		(void)memcpy(recv_state->bad_code, broadcast_code,
 			     sizeof(recv_state->bad_code));
 	}
@@ -701,9 +701,8 @@ static uint8_t char_discover_func(struct bt_conn *conn,
 		}
 
 		if (sub_params != NULL) {
-			/* With ccc_handle == 0 it will use auto discovery */
 			sub_params->end_handle = inst->end_handle;
-			sub_params->ccc_handle = 0;
+			sub_params->ccc_handle = BT_GATT_AUTO_DISCOVER_CCC_HANDLE;
 			sub_params->value = BT_GATT_CCC_NOTIFY;
 			sub_params->value_handle = attr->handle + 1;
 			sub_params->notify = notify_handler;
@@ -956,6 +955,8 @@ static int broadcast_assistant_reset(struct bap_broadcast_assistant_instance *in
 
 	for (int i = 0U; i < CONFIG_BT_BAP_BROADCAST_ASSISTANT_RECV_STATE_COUNT; i++) {
 		memset(&inst->recv_states[i], 0, sizeof(inst->recv_states[i]));
+		inst->recv_states[i].broadcast_id = BT_BAP_INVALID_BROADCAST_ID;
+		inst->recv_states[i].adv_sid = BT_HCI_LE_EXT_ADV_SID_INVALID;
 		inst->recv_states[i].past_avail = false;
 		inst->recv_state_handles[i] = 0U;
 	}
@@ -1445,7 +1446,7 @@ int bt_bap_broadcast_assistant_mod_src(struct bt_conn *conn,
 
 int bt_bap_broadcast_assistant_set_broadcast_code(
 	struct bt_conn *conn, uint8_t src_id,
-	const uint8_t broadcast_code[BT_AUDIO_BROADCAST_CODE_SIZE])
+	const uint8_t broadcast_code[BT_ISO_BROADCAST_CODE_SIZE])
 {
 	struct bt_bap_bass_cp_broadcase_code *cp;
 	struct bap_broadcast_assistant_instance *inst;
@@ -1478,10 +1479,9 @@ int bt_bap_broadcast_assistant_set_broadcast_code(
 	cp->opcode = BT_BAP_BASS_OP_BROADCAST_CODE;
 	cp->src_id = src_id;
 
-	(void)memcpy(cp->broadcast_code, broadcast_code,
-		     BT_AUDIO_BROADCAST_CODE_SIZE);
+	(void)memcpy(cp->broadcast_code, broadcast_code, BT_ISO_BROADCAST_CODE_SIZE);
 
-	LOG_HEXDUMP_DBG(cp->broadcast_code, BT_AUDIO_BROADCAST_CODE_SIZE, "broadcast code:");
+	LOG_HEXDUMP_DBG(cp->broadcast_code, BT_ISO_BROADCAST_CODE_SIZE, "broadcast code:");
 
 	return bt_bap_broadcast_assistant_common_cp(conn, &att_buf);
 }

@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 #include <zephyr/autoconf.h>
 #include <zephyr/bluetooth/audio/audio.h>
@@ -53,7 +54,7 @@ ATOMIC_DEFINE(flags, FLAG_NUM);
 
 static struct broadcast_sink {
 	const struct bt_bap_scan_delegator_recv_state *req_recv_state;
-	uint8_t sink_broadcast_code[BT_AUDIO_BROADCAST_CODE_SIZE];
+	uint8_t sink_broadcast_code[BT_ISO_BROADCAST_CODE_SIZE];
 	struct bt_bap_broadcast_sink *bap_broadcast_sink;
 	struct bt_cap_stream broadcast_stream;
 	struct bt_le_per_adv_sync *pa_sync;
@@ -423,14 +424,14 @@ static int pa_sync_term_req_cb(struct bt_conn *conn,
 
 static void broadcast_code_cb(struct bt_conn *conn,
 			      const struct bt_bap_scan_delegator_recv_state *recv_state,
-			      const uint8_t broadcast_code[BT_AUDIO_BROADCAST_CODE_SIZE])
+			      const uint8_t broadcast_code[BT_ISO_BROADCAST_CODE_SIZE])
 {
 	LOG_INF("Broadcast code received for %p", recv_state);
 
 	broadcast_sink.req_recv_state = recv_state;
 
 	(void)memcpy(broadcast_sink.sink_broadcast_code, broadcast_code,
-		     BT_AUDIO_BROADCAST_CODE_SIZE);
+		     BT_ISO_BROADCAST_CODE_SIZE);
 
 	atomic_set_bit(flags, FLAG_BROADCAST_CODE_RECEIVED);
 }
@@ -731,6 +732,13 @@ int init_cap_acceptor_broadcast(void)
 			.recv = broadcast_scan_recv,
 		};
 
+		err = bt_bap_scan_delegator_register(&scan_delegator_cbs);
+		if (err != 0) {
+			LOG_ERR("Scan delegator register failed (err %d)", err);
+
+			return err;
+		}
+
 		err = bt_bap_broadcast_sink_register_cb(&broadcast_sink_cbs);
 		if (err != 0) {
 			LOG_ERR("Failed to register BAP broadcast sink callbacks: %d", err);
@@ -739,7 +747,6 @@ int init_cap_acceptor_broadcast(void)
 		}
 
 		bt_cap_stream_ops_register(&broadcast_sink.broadcast_stream, &broadcast_stream_ops);
-		bt_bap_scan_delegator_register_cb(&scan_delegator_cbs);
 		bt_le_per_adv_sync_cb_register(&bap_pa_sync_cb);
 
 		if (IS_ENABLED(CONFIG_SAMPLE_SCAN_SELF)) {

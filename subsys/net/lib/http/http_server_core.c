@@ -12,6 +12,8 @@
 #include <string.h>
 #include <strings.h>
 
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/fs_interface.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/http/service.h>
@@ -163,8 +165,8 @@ int http_server_init(struct http_server_ctx *ctx)
 		if (IS_ENABLED(CONFIG_NET_IPV4_MAPPING_TO_IPV6)) {
 			int optval = 0;
 
-			(void)setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
-					 &optval, sizeof(optval));
+			(void)zsock_setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &optval,
+					       sizeof(optval));
 		}
 
 #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
@@ -758,7 +760,13 @@ void http_server_get_content_type_from_extension(char *url, char *content_type,
 	size_t url_len = strlen(url);
 
 	HTTP_SERVER_CONTENT_TYPE_FOREACH(ct) {
-		char *ext = &url[url_len - ct->extension_len];
+		char *ext;
+
+		if (url_len <= ct->extension_len) {
+			continue;
+		}
+
+		ext = &url[url_len - ct->extension_len];
 
 		if (strncmp(ext, ct->extension, ct->extension_len) == 0) {
 			strncpy(content_type, ct->content_type, content_type_size);

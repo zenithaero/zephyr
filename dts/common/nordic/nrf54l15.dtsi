@@ -6,6 +6,7 @@
 
 #include <mem.h>
 #include <nordic/nrf_common.dtsi>
+#include <zephyr/dt-bindings/adc/nrf-saadc-nrf54l.h>
 #include <zephyr/dt-bindings/regulator/nrf5x.h>
 
 /delete-node/ &sw_pwm;
@@ -212,6 +213,7 @@
 				ieee802154-supported;
 				ble-2mbps-supported;
 				ble-coded-phy-supported;
+				cs-supported;
 
 				ieee802154: ieee802154 {
 					compatible = "nordic,nrf-ieee802154";
@@ -238,10 +240,10 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 				reg = <0xc6000 0x1000>;
-				clock-frequency = <I2C_BITRATE_STANDARD>;
 				interrupts = <198 NRF_DEFAULT_IRQ_PRIORITY>;
 				easydma-maxcnt-bits = <16>;
 				status = "disabled";
+				zephyr,pm-device-runtime-auto;
 			};
 
 			spi20: spi@c6000 {
@@ -277,10 +279,10 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 				reg = <0xc7000 0x1000>;
-				clock-frequency = <I2C_BITRATE_STANDARD>;
 				interrupts = <199 NRF_DEFAULT_IRQ_PRIORITY>;
 				easydma-maxcnt-bits = <16>;
 				status = "disabled";
+				zephyr,pm-device-runtime-auto;
 			};
 
 			spi21: spi@c7000 {
@@ -316,10 +318,10 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 				reg = <0xc8000 0x1000>;
-				clock-frequency = <I2C_BITRATE_STANDARD>;
 				interrupts = <200 NRF_DEFAULT_IRQ_PRIORITY>;
 				easydma-maxcnt-bits = <16>;
 				status = "disabled";
+				zephyr,pm-device-runtime-auto;
 			};
 
 			spi22: spi@c8000 {
@@ -526,10 +528,10 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 				reg = <0x104000 0x1000>;
-				clock-frequency = <I2C_BITRATE_STANDARD>;
 				interrupts = <260 NRF_DEFAULT_IRQ_PRIORITY>;
 				easydma-maxcnt-bits = <16>;
 				status = "disabled";
+				zephyr,pm-device-runtime-auto;
 			};
 
 			spi30: spi@104000 {
@@ -558,6 +560,17 @@
 				status = "disabled";
 				endtx-stoptx-supported;
 				frame-timeout-supported;
+			};
+
+			comp: comparator@106000 {
+				/*
+				 * Use compatible "nordic,nrf-comp" to configure as COMP
+				 * Use compatible "nordic,nrf-lpcomp" to configure as LPCOMP
+				 */
+				compatible = "nordic,nrf-comp";
+				reg = <0x106000 0x1000>;
+				status = "disabled";
+				interrupts = <262 NRF_DEFAULT_IRQ_PRIORITY>;
 			};
 
 #ifdef USE_NON_SECURE_ADDRESS_MAP

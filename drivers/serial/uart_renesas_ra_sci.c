@@ -860,17 +860,23 @@ static void uart_ra_sci_callback_adapter(struct st_uart_callback_arg *fsp_args)
 
 	switch (fsp_args->event) {
 	case UART_EVENT_TX_COMPLETE:
-		return async_evt_tx_done(dev);
+		async_evt_tx_done(dev);
+		break;
 	case UART_EVENT_RX_COMPLETE:
 		async_evt_rx_complete(dev);
+		break;
 	case UART_EVENT_ERR_PARITY:
-		return async_evt_rx_err(dev, UART_ERROR_PARITY);
+		async_evt_rx_err(dev, UART_ERROR_PARITY);
+		break;
 	case UART_EVENT_ERR_FRAMING:
-		return async_evt_rx_err(dev, UART_ERROR_FRAMING);
+		async_evt_rx_err(dev, UART_ERROR_FRAMING);
+		break;
 	case UART_EVENT_ERR_OVERFLOW:
-		return async_evt_rx_err(dev, UART_ERROR_OVERRUN);
+		async_evt_rx_err(dev, UART_ERROR_OVERRUN);
+		break;
 	case UART_EVENT_BREAK_DETECT:
-		return async_evt_rx_err(dev, UART_BREAK);
+		async_evt_rx_err(dev, UART_BREAK);
+		break;
 	case UART_EVENT_TX_DATA_EMPTY:
 	case UART_EVENT_RX_CHAR:
 		break;
@@ -1174,7 +1180,7 @@ static void uart_ra_sci_eri_isr(const struct device *dev)
 				.parity = UART_CFG_PARITY_NONE,                                    \
 				.stop_bits = UART_CFG_STOP_BITS_1,                                 \
 				.data_bits = UART_CFG_DATA_BITS_8,                                 \
-				.flow_ctrl = COND_CODE_1(DT_NODE_HAS_PROP(idx, hw_flow_control),   \
+				.flow_ctrl = COND_CODE_1(DT_INST_PROP(index, hw_flow_control),     \
 							 (UART_CFG_FLOW_CTRL_RTS_CTS),             \
 							 (UART_CFG_FLOW_CTRL_NONE)),               \
 			},                                                                         \

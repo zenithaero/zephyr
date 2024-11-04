@@ -206,19 +206,31 @@ def test_executioncounter(capfd):
     sys.stderr.write(err)
 
     assert (
-        f'--------------------------------\n'
-        f'Total test suites: 12\n'
-        f'Total test cases: 25\n'
-        f'Executed test cases: 19\n'
-        f'Skipped test cases: 6\n'
-        f'Completed test suites: 9\n'
-        f'Passing test suites: 6\n'
-        f'Failing test suites: 1\n'
-        f'Skipped test suites: 3\n'
-        f'Skipped test suites (runtime): 1\n'
-        f'Skipped test suites (filter): 2\n'
-        f'Errors: 2\n'
-        f'--------------------------------'
+        '--------------------------------------------------\n'
+        'Total test suites:     12\n'
+        'Processed test suites:  9\n'
+        '├─ Filtered test suites (static):       2\n'
+        '└─ Completed test suites:               7\n'
+        '   ├─ Filtered test suites (at runtime):   1\n'
+        '   ├─ Passed test suites:                  6\n'
+        '   ├─ Built only test suites:              0\n'
+        '   ├─ Failed test suites:                  1\n'
+        '   └─ Errors in test suites:               2\n'
+        '\n'
+        'Filtered test suites: 3\n'
+        '├─ Filtered test suites (static):       2\n'
+        '└─ Filtered test suites (at runtime):   1\n'
+        '----------------------      ----------------------\n'
+        'Total test cases: 25\n'
+        '├─ Filtered test cases:  0\n'
+        '├─ Skipped test cases:   6\n'
+        '└─ Executed test cases: 19\n'
+        '   ├─ Passed test cases:        0\n'
+        '   ├─ Built only test cases:    0\n'
+        '   ├─ Blocked test cases:       0\n'
+        '   ├─ Failed test cases:        0\n'
+        '   └─ Errors in test cases:     0\n'
+        '--------------------------------------------------\n'
     ) in out
 
     assert ec.cases == 25
@@ -254,7 +266,7 @@ TESTDATA_1_1 = [
 ]
 TESTDATA_1_2 = [
     (0, False, 'dummy out',
-     True, True, TwisterStatus.PASS, None, False, True),
+     True, True, TwisterStatus.NOTRUN, None, False, True),
     (0, True, '',
      False, False, TwisterStatus.PASS, None, False, False),
     (1, True, 'ERROR: region `FLASH\' overflowed by 123 MB',
@@ -355,7 +367,7 @@ def test_cmake_run_build(
 
     if expected_add_missing:
         cmake.instance.add_missing_case_status.assert_called_once_with(
-            TwisterStatus.SKIP, 'Test was built only'
+            TwisterStatus.NOTRUN, 'Test was built only'
         )
 
 
@@ -371,7 +383,8 @@ TESTDATA_2_2 = [
      [os.path.join('dummy', 'cmake'),
       '-B' + os.path.join('build', 'dir'), '-DTC_RUNID=1', '-DTC_NAME=testcase',
       '-DSB_CONFIG_COMPILER_WARNINGS_AS_ERRORS=y',
-      '-DEXTRA_GEN_DEFINES_ARGS=--edtlib-Werror', '-Gdummy_generator',
+      '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-Gdummy_generator',
+      f'-DPython3_EXECUTABLE={pathlib.Path(sys.executable).as_posix()}',
       '-S' + os.path.join('source', 'dir'),
       'arg1', 'arg2',
       '-DBOARD=<platform name>',
@@ -381,11 +394,12 @@ TESTDATA_2_2 = [
     (False, [],
      1, True, 'ERROR: region `FLASH\' overflowed by 123 MB',
      True, False, True,
-     TwisterStatus.ERROR, 'Cmake build failure',
+     TwisterStatus.ERROR, 'CMake build failure',
      [os.path.join('dummy', 'cmake'),
       '-B' + os.path.join('build', 'dir'), '-DTC_RUNID=1', '-DTC_NAME=testcase',
       '-DSB_CONFIG_COMPILER_WARNINGS_AS_ERRORS=n',
-      '-DEXTRA_GEN_DEFINES_ARGS=', '-Gdummy_generator',
+      '-DEXTRA_GEN_EDT_ARGS=', '-Gdummy_generator',
+      f'-DPython3_EXECUTABLE={pathlib.Path(sys.executable).as_posix()}',
       '-Szephyr_base/share/sysbuild',
       '-DAPP_DIR=' + os.path.join('source', 'dir'),
       'arg1', 'arg2',
@@ -1418,7 +1432,7 @@ TESTDATA_6 = [
     (
         {'op': 'cleanup', 'mode': 'all'},
         mock.ANY,
-        'Cmake build failure',
+        'CMake build failure',
         mock.ANY,
         mock.ANY,
         mock.ANY,
@@ -1544,7 +1558,7 @@ def test_projectbuilder_process(
 
     assert pb.instance.status == expected_status
     assert pb.instance.reason == expected_reason
-    assert results_mock.skipped_runtime == expected_skipped
+    assert results_mock.skipped_runtime_increment.call_args_list == [mock.call()] * expected_skipped
 
     if expected_missing:
         pb.instance.add_missing_case_status.assert_called_with(*expected_missing)
@@ -1933,16 +1947,16 @@ TESTDATA_13 = [
         TwisterStatus.ERROR, True, True, False,
         ['INFO      20/25 dummy platform' \
          '            dummy.testsuite.name' \
-         '                                ERROR dummy reason (cmake)'],
+         '                               ERROR dummy reason (cmake)'],
         None
     ),
     (
         TwisterStatus.FAIL, False, False, False,
         ['ERROR     dummy platform' \
          '            dummy.testsuite.name' \
-         '                                FAILED : dummy reason'],
-        'INFO    - Total complete:   20/  25  80%  skipped:    3,' \
-        ' failed:    3, error:    1'
+         '                               FAILED: dummy reason'],
+        'INFO    - Total complete:   20/  25  80%' \
+        '  built (not run):    0, filtered:    3, failed:    3, error:    1'
     ),
     (
         TwisterStatus.SKIP, True, False, False,
@@ -1954,8 +1968,8 @@ TESTDATA_13 = [
     (
         TwisterStatus.FILTER, False, False, False,
         [],
-        'INFO    - Total complete:   20/  25  80%  skipped:    4,' \
-        ' failed:    2, error:    1'
+        'INFO    - Total complete:   20/  25  80%' \
+        '  built (not run):    0, filtered:    4, failed:    2, error:    1'
     ),
     (
         TwisterStatus.PASS, True, False, True,
@@ -1975,8 +1989,8 @@ TESTDATA_13 = [
     (
         'unknown status', False, False, False,
         ['Unknown status = unknown status'],
-        'INFO    - Total complete:   20/  25  80%  skipped:    3,' \
-        ' failed:    2, error:    1\r'
+        'INFO    - Total complete:   20/  25  80%'
+        '  built (not run):    0, filtered:    3, failed:    2, error:    1\r'
     )
 ]
 
@@ -2008,10 +2022,10 @@ def test_projectbuilder_report_out(
     instance_mock.status = status
     instance_mock.reason = 'dummy reason'
     instance_mock.testsuite.name = 'dummy.testsuite.name'
-    skip_mock_tc = mock.Mock(status=TwisterStatus.SKIP, reason='?')
-    skip_mock_tc.name = '?'
-    unknown_mock_tc = mock.Mock(status=mock.Mock(value='?'), reason='?')
-    unknown_mock_tc.name = '?'
+    skip_mock_tc = mock.Mock(status=TwisterStatus.SKIP, reason=None)
+    skip_mock_tc.name = 'mocked_testcase_to_skip'
+    unknown_mock_tc = mock.Mock(status=mock.Mock(value='dummystatus'), reason=None)
+    unknown_mock_tc.name = 'mocked_testcase_unknown'
     instance_mock.testsuite.testcases = [unknown_mock_tc for _ in range(25)]
     instance_mock.testcases = [unknown_mock_tc for _ in range(24)] + \
                               [skip_mock_tc]
@@ -2023,20 +2037,49 @@ def test_projectbuilder_report_out(
     pb.options.seed = 123
     pb.log_info_file = mock.Mock()
 
-    results_mock = mock.Mock()
+    results_mock = mock.Mock(
+        total = 25,
+        done = 19,
+        passed = 17,
+        notrun = 0,
+        failed = 2,
+        skipped_configs = 3,
+        skipped_runtime = 0,
+        skipped_filter = 0,
+        error = 1,
+        cases = 0,
+        filtered_cases = 0,
+        skipped_cases = 4,
+        failed_cases = 0,
+        error_cases = 0,
+        blocked_cases = 0,
+        passed_cases = 0,
+        none_cases = 0,
+        started_cases = 0
+    )
     results_mock.iteration = 1
-    results_mock.total = 25
-    results_mock.done = 19
-    results_mock.passed = 17
-    results_mock.skipped_configs = 3
-    results_mock.skipped_cases = 4
-    results_mock.failed = 2
-    results_mock.error = 1
-    results_mock.cases = 0
+    def results_done_increment(value=1, decrement=False):
+        results_mock.done += value * (-1 if decrement else 1)
+    results_mock.done_increment = results_done_increment
+    def skipped_configs_increment(value=1, decrement=False):
+        results_mock.skipped_configs += value * (-1 if decrement else 1)
+    results_mock.skipped_configs_increment = skipped_configs_increment
+    def skipped_filter_increment(value=1, decrement=False):
+        results_mock.skipped_filter += value * (-1 if decrement else 1)
+    results_mock.skipped_filter_increment = skipped_filter_increment
+    def skipped_runtime_increment(value=1, decrement=False):
+        results_mock.skipped_runtime += value * (-1 if decrement else 1)
+    results_mock.skipped_runtime_increment = skipped_runtime_increment
+    def failed_increment(value=1, decrement=False):
+        results_mock.failed += value * (-1 if decrement else 1)
+    results_mock.failed_increment = failed_increment
+    def notrun_increment(value=1, decrement=False):
+        results_mock.notrun += value * (-1 if decrement else 1)
+    results_mock.notrun_increment = notrun_increment
 
     pb.report_out(results_mock)
 
-    assert results_mock.cases == 25
+    assert results_mock.cases_increment.call_args_list == [mock.call(25)]
 
     trim_actual_log = re.sub(
         r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])',
@@ -2044,8 +2087,10 @@ def test_projectbuilder_report_out(
         caplog.text
     )
     trim_actual_log = re.sub(r'twister:runner.py:\d+', '', trim_actual_log)
+
     assert all([log in trim_actual_log for log in expected_logs])
 
+    print(trim_actual_log)
     if expected_out:
         out, err = capfd.readouterr()
         sys.stdout.write(out)
@@ -2097,11 +2142,13 @@ def test_projectbuilder_cmake():
     instance_mock = mock.Mock()
     instance_mock.handler = 'dummy handler'
     instance_mock.build_dir = os.path.join('build', 'dir')
+    instance_mock.platform.name = 'frdm_k64f'
     env_mock = mock.Mock()
 
     pb = ProjectBuilder(instance_mock, env_mock, mocked_jobserver)
     pb.build_dir = 'build_dir'
-    pb.testsuite.extra_args = ['some', 'args']
+    pb.testsuite.platform = instance_mock.platform
+    pb.testsuite.extra_args = ['some', 'platform:frdm_k64f:args']
     pb.testsuite.extra_conf_files = ['some', 'files1']
     pb.testsuite.extra_overlay_confs = ['some', 'files2']
     pb.testsuite.extra_dtc_overlay_files = ['some', 'files3']
@@ -2114,7 +2161,7 @@ def test_projectbuilder_cmake():
 
     assert res == cmake_res_mock
     pb.cmake_assemble_args.assert_called_once_with(
-        pb.testsuite.extra_args,
+        ['some', 'args'],
         pb.instance.handler,
         pb.testsuite.extra_conf_files,
         pb.testsuite.extra_overlay_confs,
@@ -2441,6 +2488,10 @@ def test_twisterrunner_run(
     results_mock().failed = 2
     results_mock().total = 9
 
+    def iteration_increment(value=1, decrement=False):
+        results_mock().iteration += value * (-1 if decrement else 1)
+    results_mock().iteration_increment = iteration_increment
+
     with mock.patch('twisterlib.runner.ExecutionCounter', results_mock), \
          mock.patch('twisterlib.runner.BaseManager', manager_mock), \
          mock.patch('twisterlib.runner.GNUMakeJobClient.from_environ',
@@ -2511,18 +2562,45 @@ def test_twisterrunner_update_counting_before_pipeline():
 
     tr = TwisterRunner(instances, suites, env=env_mock)
     tr.results = mock.Mock(
-        skipped_filter = 0,
+        total = 0,
+        done = 0,
+        passed = 0,
+        failed = 0,
         skipped_configs = 0,
-        skipped_cases = 0,
+        skipped_runtime = 0,
+        skipped_filter = 0,
+        error = 0,
         cases = 0,
-        error = 0
+        filtered_cases = 0,
+        skipped_cases = 0,
+        failed_cases = 0,
+        error_cases = 0,
+        blocked_cases = 0,
+        passed_cases = 0,
+        none_cases = 0,
+        started_cases = 0
     )
+    def skipped_configs_increment(value=1, decrement=False):
+        tr.results.skipped_configs += value * (-1 if decrement else 1)
+    tr.results.skipped_configs_increment = skipped_configs_increment
+    def skipped_filter_increment(value=1, decrement=False):
+        tr.results.skipped_filter += value * (-1 if decrement else 1)
+    tr.results.skipped_filter_increment = skipped_filter_increment
+    def error_increment(value=1, decrement=False):
+        tr.results.error += value * (-1 if decrement else 1)
+    tr.results.error_increment = error_increment
+    def cases_increment(value=1, decrement=False):
+        tr.results.cases += value * (-1 if decrement else 1)
+    tr.results.cases_increment = cases_increment
+    def filtered_cases_increment(value=1, decrement=False):
+        tr.results.filtered_cases += value * (-1 if decrement else 1)
+    tr.results.filtered_cases_increment = filtered_cases_increment
 
     tr.update_counting_before_pipeline()
 
     assert tr.results.skipped_filter == 1
     assert tr.results.skipped_configs == 1
-    assert tr.results.skipped_cases == 4
+    assert tr.results.filtered_cases == 4
     assert tr.results.cases == 4
     assert tr.results.error == 1
 
@@ -2550,7 +2628,7 @@ def test_twisterrunner_show_brief(caplog):
     tr.show_brief()
 
     log = '2 test scenarios (5 test instances) selected,' \
-          ' 4 configurations skipped (3 by static filter, 1 at runtime).'
+          ' 4 configurations filtered (3 by static filter, 1 at runtime).'
 
     assert log in caplog.text
 
@@ -2601,6 +2679,7 @@ def test_twisterrunner_add_tasks_to_queue(
     tr.get_cmake_filter_stages = mock.Mock(
         side_effect=mock_get_cmake_filter_stages
     )
+    tr.results = mock.Mock(iteration=0)
 
     pipeline_mock = mock.Mock()
 

@@ -217,6 +217,7 @@ struct lwm2m_ctx {
 	sys_slist_t queued_messages;
 #endif
 	sys_slist_t observer;
+	struct k_mutex lock;
 	/** @endcond */
 
 	/** A pointer to currently processed request, for internal LwM2M engine
@@ -245,8 +246,6 @@ struct lwm2m_ctx {
 	char *desthostname;
 	/** Destination hostname length */
 	uint16_t desthostnamelen;
-	/** Flag to indicate if hostname verification is enabled */
-	bool hostname_verify;
 
 	/** Custom load_credentials function.
 	 *  Client can set load_credentials function as a way of overriding

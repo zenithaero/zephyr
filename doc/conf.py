@@ -8,7 +8,7 @@ import re
 import textwrap
 
 ZEPHYR_BASE = Path(__file__).resolve().parents[1]
-ZEPHYR_BUILD = Path(os.environ.get("DOCS_HTML_DIR")).resolve()
+ZEPHYR_BUILD = Path(os.environ.get("OUTPUT_DIR")).resolve()
 
 # Add the '_extensions' directory to sys.path, to enable finding Sphinx
 # extensions within.
@@ -258,6 +258,9 @@ html_redirect_pages = redirects.REDIRECTS
 # -- Options for zephyr.link-roles ----------------------------------------
 
 link_roles_manifest_project = "zephyr"
+link_roles_manifest_project_broken_links_ignore_globs = [
+    "releases/release-notes-[123].*.rst",
+]
 link_roles_manifest_baseurl = "https://github.com/zephyrproject-rtos/zephyr"
 
 # -- Options for notfound.extension ---------------------------------------
@@ -354,4 +357,3 @@ def setup(app):
     # theme customizations
     app.add_css_file("css/custom.css")
     app.add_js_file("js/custom.js")
-    app.add_js_file("js/dark-mode-toggle.min.mjs", type="module")

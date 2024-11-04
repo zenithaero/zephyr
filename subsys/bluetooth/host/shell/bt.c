@@ -76,6 +76,8 @@ static struct bt_conn_auth_info_cb auth_info_cb;
  */
 #define HCI_CMD_MAX_PARAM 65
 
+#define DEFAULT_SCAN_TIMEOUT_SEC 10
+
 #if defined(CONFIG_BT_BROADCASTER)
 enum {
 	SHELL_ADV_OPT_CONNECTABLE,
@@ -218,9 +220,31 @@ static struct bt_auto_connect {
 	bool addr_set;
 	bool connect_name;
 } auto_connect;
-#endif
+#endif /* CONFIG_BT_CENTRAL */
 
 #if defined(CONFIG_BT_OBSERVER)
+static void active_scan_timeout(struct k_work *work)
+{
+	int err;
+
+	shell_print(ctx_shell, "Scan timeout");
+
+	err = bt_le_scan_stop();
+	if (err) {
+		shell_error(ctx_shell, "Failed to stop scan (err %d)", err);
+	}
+
+#if defined(CONFIG_BT_CENTRAL)
+	if (auto_connect.connect_name) {
+		auto_connect.connect_name = false;
+		/* "name" is what would be in argv[0] normally */
+		cmd_scan_filter_clear_name(ctx_shell, 1, (char *[]){ "name" });
+	}
+#endif /* CONFIG_BT_CENTRAL */
+}
+
+static K_WORK_DELAYABLE_DEFINE(active_scan_timeout_work, active_scan_timeout);
+
 static struct bt_scan_filter {
 	char name[NAME_LEN];
 	bool name_set;
@@ -591,14 +615,6 @@ static void scan_recv(const struct bt_le_scan_recv_info *info, struct net_buf_si
 static void scan_timeout(void)
 {
 	shell_print(ctx_shell, "Scan timeout");
-
-#if defined(CONFIG_BT_CENTRAL)
-	if (auto_connect.connect_name) {
-		auto_connect.connect_name = false;
-		/* "name" is what would be in argv[0] normally */
-		cmd_scan_filter_clear_name(ctx_shell, 1, (char *[]){ "name" });
-	}
-#endif /* CONFIG_BT_CENTRAL */
 }
 #endif /* CONFIG_BT_OBSERVER */
 
@@ -1052,6 +1068,64 @@ void print_remote_cs_fae_table(struct bt_conn *conn, struct bt_conn_le_cs_fae_ta
 	shell_print(ctx_shell, "Received FAE Table: ");
 	shell_hexdump(ctx_shell, params->remote_fae_table, 72);
 }
+
+static void le_cs_config_created(struct bt_conn *conn, struct bt_conn_le_cs_config *config)
+{
+	const char *mode_str[5] = {"Unused", "1 (RTT)", "2 (PBR)", "3 (RTT + PBR)", "Invalid"};
+	const char *role_str[3] = {"Initiator", "Reflector", "Invalid"};
+	const char *rtt_type_str[8] = {"AA only",        "32-bit sounding", "96-bit sounding",
+				       "32-bit random",  "64-bit random",   "96-bit random",
+				       "128-bit random", "Invalid"};
+	const char *phy_str[4] = {"Invalid", "LE 1M PHY", "LE 2M PHY", "LE 2M 2BT PHY"};
+	const char *chsel_type_str[3] = {"Algorithm #3b", "Algorithm #3c", "Invalid"};
+	const char *ch3c_shape_str[3] = {"Hat shape", "X shape", "Invalid"};
+
+	uint8_t main_mode_idx = config->main_mode_type > 0 && config->main_mode_type < 4
+					? config->main_mode_type
+					: 4;
+	uint8_t sub_mode_idx = config->sub_mode_type < 4 ? config->sub_mode_type : 0;
+	uint8_t role_idx = MIN(config->role, 2);
+	uint8_t rtt_type_idx = MIN(config->rtt_type, 7);
+	uint8_t phy_idx =
+		config->cs_sync_phy > 0 && config->cs_sync_phy < 4 ? config->cs_sync_phy : 0;
+	uint8_t chsel_type_idx = MIN(config->channel_selection_type, 2);
+	uint8_t ch3c_shape_idx = MIN(config->ch3c_shape, 2);
+
+	shell_print(ctx_shell,
+		    "New CS config created:\n"
+		    "- ID: %d\n"
+		    "- Role: %s\n"
+		    "- Main mode: %s\n"
+		    "- Sub mode: %s\n"
+		    "- RTT type: %s\n"
+		    "- Main mode steps: %d - %d\n"
+		    "- Main mode repetition: %d\n"
+		    "- Mode 0 steps: %d\n"
+		    "- CS sync PHY: %s\n"
+		    "- T_IP1 time: %d\n"
+		    "- T_IP2 time: %d\n"
+		    "- T_FCS time: %d\n"
+		    "- T_PM time: %d\n"
+		    "- Channel map: 0x%08X%08X%04X\n"
+		    "- Channel map repetition: %d\n"
+		    "- Channel selection type: %s\n"
+		    "- Ch3c shape: %s\n"
+		    "- Ch3c jump: %d\n",
+		    config->id, role_str[role_idx], mode_str[main_mode_idx], mode_str[sub_mode_idx],
+		    rtt_type_str[rtt_type_idx], config->min_main_mode_steps,
+		    config->max_main_mode_steps, config->main_mode_repetition, config->mode_0_steps,
+		    phy_str[phy_idx], config->t_ip1_time_us, config->t_ip2_time_us,
+		    config->t_fcs_time_us, config->t_pm_time_us,
+		    sys_get_le32(&config->channel_map[6]), sys_get_le32(&config->channel_map[2]),
+		    sys_get_le16(&config->channel_map[0]), config->channel_map_repetition,
+		    chsel_type_str[chsel_type_idx], ch3c_shape_str[ch3c_shape_idx],
+		    config->ch3c_jump);
+}
+
+static void le_cs_config_removed(struct bt_conn *conn, uint8_t config_id)
+{
+	shell_print(ctx_shell, "CS config %d is removed", config_id);
+}
 #endif
 
 static struct bt_conn_cb conn_callbacks = {
@@ -1084,8 +1158,10 @@ static struct bt_conn_cb conn_callbacks = {
 	.subrate_changed = subrate_changed,
 #endif
 #if defined(CONFIG_BT_CHANNEL_SOUNDING)
-	.remote_cs_capabilities_available = print_remote_cs_capabilities,
-	.remote_cs_fae_table_available = print_remote_cs_fae_table,
+	.le_cs_remote_capabilities_available = print_remote_cs_capabilities,
+	.le_cs_remote_fae_table_available = print_remote_cs_fae_table,
+	.le_cs_config_created = le_cs_config_created,
+	.le_cs_config_removed = le_cs_config_removed,
 #endif
 };
 #endif /* CONFIG_BT_CONN */
@@ -1542,7 +1618,7 @@ static int cmd_active_scan_on(const struct shell *sh, uint32_t options,
 			.options    = BT_LE_SCAN_OPT_NONE,
 			.interval   = BT_GAP_SCAN_FAST_INTERVAL,
 			.window     = BT_GAP_SCAN_FAST_WINDOW,
-			.timeout    = timeout, };
+			.timeout    = 0, };
 
 	param.options |= options;
 
@@ -1553,6 +1629,11 @@ static int cmd_active_scan_on(const struct shell *sh, uint32_t options,
 		return err;
 	} else {
 		shell_print(sh, "Bluetooth active scan enabled");
+	}
+
+	if (timeout != 0) {
+		/* Schedule the k_work to act as a timeout */
+		(void)k_work_reschedule(&active_scan_timeout_work, K_SECONDS(timeout));
 	}
 
 	return 0;
@@ -1586,6 +1667,9 @@ static int cmd_passive_scan_on(const struct shell *sh, uint32_t options,
 static int cmd_scan_off(const struct shell *sh)
 {
 	int err;
+
+	/* Cancel the potentially pending scan timeout work */
+	(void)k_work_cancel_delayable(&active_scan_timeout_work);
 
 	err = bt_le_scan_stop();
 	if (err) {
@@ -1919,7 +2003,7 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 	param.interval_max = BT_GAP_ADV_FAST_INT_MAX_2;
 
 	if (!strcmp(argv[1], "on")) {
-		param.options = BT_LE_ADV_OPT_CONNECTABLE;
+		param.options = BT_LE_ADV_OPT_CONN;
 	} else if (!strcmp(argv[1], "nconn")) {
 		param.options = 0U;
 	} else {
@@ -1949,8 +2033,6 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 		} else if (!strcmp(arg, "name-ad")) {
 			name_ad = true;
 			name_sd = false;
-		} else if (!strcmp(arg, "one-time")) {
-			param.options |= BT_LE_ADV_OPT_ONE_TIME;
 		} else if (!strcmp(arg, "disable-37")) {
 			param.options |= BT_LE_ADV_OPT_DISABLE_CHAN_37;
 		} else if (!strcmp(arg, "disable-38")) {
@@ -1974,7 +2056,7 @@ static int cmd_advertise(const struct shell *sh, size_t argc, char *argv[])
 
 	atomic_clear(adv_opt);
 	atomic_set_bit_to(adv_opt, SHELL_ADV_OPT_CONNECTABLE,
-			  (param.options & BT_LE_ADV_OPT_CONNECTABLE) > 0);
+			  (param.options & BT_LE_ADV_OPT_CONN) > 0);
 	atomic_set_bit_to(adv_opt, SHELL_ADV_OPT_DISCOVERABLE, discoverable);
 	atomic_set_bit_to(adv_opt, SHELL_ADV_OPT_APPEARANCE, appearance);
 
@@ -2059,10 +2141,10 @@ static bool adv_param_parse(size_t argc, char *argv[],
 	memset(param, 0, sizeof(struct bt_le_adv_param));
 
 	if (!strcmp(argv[1], "conn-scan")) {
-		param->options |= BT_LE_ADV_OPT_CONNECTABLE;
+		param->options |= BT_LE_ADV_OPT_CONN;
 		param->options |= BT_LE_ADV_OPT_SCANNABLE;
 	} else if (!strcmp(argv[1], "conn-nscan")) {
-		param->options |= BT_LE_ADV_OPT_CONNECTABLE;
+		param->options |= BT_LE_ADV_OPT_CONN;
 	} else if (!strcmp(argv[1], "nconn-scan")) {
 		param->options |= BT_LE_ADV_OPT_SCANNABLE;
 	} else if (!strcmp(argv[1], "nconn-nscan")) {
@@ -2161,7 +2243,7 @@ static int cmd_adv_create(const struct shell *sh, size_t argc, char *argv[])
 
 	atomic_clear(adv_set_opt[adv_index]);
 	atomic_set_bit_to(adv_set_opt[adv_index], SHELL_ADV_OPT_CONNECTABLE,
-			  (param.options & BT_LE_ADV_OPT_CONNECTABLE) > 0);
+			  (param.options & BT_LE_ADV_OPT_CONN) > 0);
 	atomic_set_bit_to(adv_set_opt[adv_index], SHELL_ADV_OPT_EXT_ADV,
 			  (param.options & BT_LE_ADV_OPT_EXT_ADV) > 0);
 
@@ -3267,13 +3349,12 @@ static int cmd_auto_conn(const struct shell *sh, size_t argc, char *argv[])
 
 static int cmd_connect_le_name(const struct shell *sh, size_t argc, char *argv[])
 {
-	const uint16_t timeout_seconds = 10;
 	const struct bt_le_scan_param param = {
 		.type       = BT_LE_SCAN_TYPE_ACTIVE,
 		.options    = BT_LE_SCAN_OPT_NONE,
 		.interval   = BT_GAP_SCAN_FAST_INTERVAL,
 		.window     = BT_GAP_SCAN_FAST_WINDOW,
-		.timeout    = timeout_seconds * 100, /* 10ms units */
+		.timeout    = 0,
 	};
 	int err;
 
@@ -3298,6 +3379,9 @@ static int cmd_connect_le_name(const struct shell *sh, size_t argc, char *argv[]
 
 	/* Set boolean to tell the scan callback to connect to this name */
 	auto_connect.connect_name = true;
+
+	/* Schedule the k_work to act as a timeout */
+	(void)k_work_reschedule(&active_scan_timeout_work, K_SECONDS(DEFAULT_SCAN_TIMEOUT_SEC));
 
 	return 0;
 }
@@ -3815,6 +3899,35 @@ static int cmd_bondable(const struct shell *sh, size_t argc, char *argv[])
 
 	return 0;
 }
+
+#if defined(CONFIG_BT_BONDABLE_PER_CONNECTION)
+static int cmd_conn_bondable(const struct shell *sh, size_t argc, char *argv[])
+{
+	int err = 0;
+	bool enable;
+
+	if (!default_conn) {
+		shell_error(sh, "Not connected");
+		return -ENOEXEC;
+	}
+
+	enable = shell_strtobool(argv[1], 0, &err);
+	if (err) {
+		shell_help(sh);
+		return SHELL_CMD_HELP_PRINTED;
+	}
+
+	shell_print(sh, "[%p] set conn bondable %s", default_conn, argv[1]);
+
+	err = bt_conn_set_bondable(default_conn, enable);
+	if (err) {
+		shell_error(sh, "Set conn bondable failed: err %d", err);
+		return -ENOEXEC;
+	}
+	shell_print(sh, "Set conn bondable done");
+	return 0;
+}
+#endif /* CONFIG_BT_BONDABLE_PER_CONNECTION */
 
 static void bond_info(const struct bt_bond_info *info, void *user_data)
 {
@@ -4891,7 +5004,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(bt_cmds,
 	SHELL_CMD_ARG(advertise, NULL,
 		      "<type: off, on, nconn> [mode: discov, non_discov] "
 		      "[filter-accept-list: fal, fal-scan, fal-conn] [identity] [no-name] "
-		      "[one-time] [name-ad] [appearance] "
+		      "[name-ad] [appearance] "
 		      "[disable-37] [disable-38] [disable-39]",
 		      cmd_advertise, 2, 8),
 #if defined(CONFIG_BT_PERIPHERAL)
@@ -4993,6 +5106,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(bt_cmds,
 		      cmd_security, 1, 2),
 	SHELL_CMD_ARG(bondable, NULL, HELP_ONOFF, cmd_bondable,
 		      2, 0),
+#if defined(CONFIG_BT_BONDABLE_PER_CONNECTION)
+	SHELL_CMD_ARG(conn-bondable, NULL, HELP_ONOFF, cmd_conn_bondable, 2, 0),
+#endif /* CONFIG_BT_BONDABLE_PER_CONNECTION */
 	SHELL_CMD_ARG(bonds, NULL, HELP_NONE, cmd_bonds, 1, 0),
 	SHELL_CMD_ARG(connections, NULL, HELP_NONE, cmd_connections, 1, 0),
 	SHELL_CMD_ARG(auth, NULL,
